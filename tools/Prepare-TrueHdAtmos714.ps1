@@ -20,7 +20,7 @@ $inputPath = (Resolve-Path -LiteralPath $InputFile).Path
 $extension = [IO.Path]::GetExtension($inputPath).ToLowerInvariant()
 
 if ([string]::IsNullOrWhiteSpace($OutputBase)) {
-    $OutputBase = Join-Path $repoRoot 'captures\\truehd-atmos-714'
+    $OutputBase = Join-Path $repoRoot 'captures\truehd-atmos-714'
 } elseif (-not [IO.Path]::IsPathRooted($OutputBase)) {
     $OutputBase = Join-Path (Get-Location) $OutputBase
 }
@@ -28,13 +28,13 @@ $OutputBase = [IO.Path]::GetFullPath($OutputBase)
 $outputDirectory = Split-Path $OutputBase -Parent
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
-$truehdd = Join-Path $PSScriptRoot 'truehdd\\truehdd.exe'
+$truehdd = Join-Path $PSScriptRoot 'truehdd\truehdd.exe'
 $extractor = Join-Path $repoRoot 'mat_truehd_extractor_v03.py'
-$cavernProject = Join-Path $PSScriptRoot 'Cavern714\\Cavern714.csproj'
-$cavernDll = Join-Path $PSScriptRoot 'Cavern714\\bin\\Release\\net8.0\\Cavern714.dll'
+$cavernProject = Join-Path $PSScriptRoot 'Cavern714\Cavern714.csproj'
+$cavernDll = Join-Path $PSScriptRoot 'Cavern714\bin\Release\net8.0\Cavern714.dll'
 
 if (-not (Test-Path -LiteralPath $truehdd)) {
-    throw "truehdd.exe not found. Run .\\tools\\Install-Truehdd.ps1 first."
+    throw "truehdd.exe not found. Run .\tools\Install-Truehdd.ps1 first."
 }
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw 'dotnet SDK was not found.'
