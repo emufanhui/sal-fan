@@ -1,0 +1,46 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<AssemblyName>CavernPipeServer</AssemblyName>
+		<Nullable>disable</Nullable>
+		<UseWPF>true</UseWPF>
+		<UseWindowsForms>true</UseWindowsForms>
+		<Copyright>Copyright © Bence Sgánetz 2016-2026</Copyright>
+		<Description>Performs Cavern operations such as rendering through named pipes.</Description>
+		<ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+		<DebugType>full</DebugType>
+		<Authors>VoidX</Authors>
+		<Product>CavernPipe Server for Windows</Product>
+		<PackageProjectUrl>https://cavern.sbence.hu/</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/VoidXH/Cavern/</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<NeutralLanguage>en</NeutralLanguage>
+		<ApplicationIcon>..\Icon.ico</ApplicationIcon>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<DebugSymbols>false</DebugSymbols>
+		<DebugType>none</DebugType>
+		<Optimize>true</Optimize>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\Cavern.Format\Cavern.Format.csproj" />
+		<ProjectReference Include="..\..\Libraries\Cavern.WPF\Cavern.WPF.csproj" />
+		<ProjectReference Include="..\Reusable\CavernPipeServer.Logic\CavernPipeServer.Logic.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Page Include="..\_Common\Styles.xaml" Link="Resources\Styles.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+		<_DeploymentManifestIconFile Remove="..\Icon.ico" />
+		<Resource Include="..\Icon.ico" Link="Resources\Icon.ico" />
+	</ItemGroup>
+
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(Configuration)'=='Release'">
+		<Exec Command="del /s /q bin\*.xml" />
+		<Exec Command="del /s /q bin\*.pdb" />
+	</Target>
+</Project>

@@ -1,0 +1,78 @@
+﻿using System;
+
+using Cavern.Utilities;
+
+namespace Cavern.Filters {
+    public partial class FastConvolver {
+        /// <summary>
+        /// Performs the convolution of two real signals. The real result is returned.
+        /// The <see cref="FFTCache"/> will be created temporarily and performance will suffer.
+        /// </summary>
+        /// <remarks>Requires <paramref name="excitation"/> and <paramref name="impulse"/> to match in a length of a power of 2.
+        /// This version of convolution rolls back if the convolution result is longer than the initial signal length.</remarks>
+        public static float[] Convolve(float[] excitation, float[] impulse) {
+            Complex[] result = ConvolveFourier(excitation, impulse);
+            result.InPlaceIFFT();
+            return Measurements.GetRealPart(result);
+        }
+
+        /// <summary>
+        /// Performs the convolution of two real signals. The real result is returned.
+        /// </summary>
+        /// <remarks>Requires <paramref name="excitation"/> and <paramref name="impulse"/> to match in a length of a power of 2.
+        /// This version of convolution rolls back if the convolution result is longer than the initial signal length.</remarks>
+        public static float[] Convolve(float[] excitation, float[] impulse, FFTCache cache) {
+            Complex[] result = ConvolveFourier(excitation, impulse, cache);
+            result.InPlaceIFFT();
+            return Measurements.GetRealPart(result);
+        }
+
+        /// <summary>
+        /// Performs the convolution of two real signals. The FFT of the result is returned.
+        /// </summary>
+        /// <remarks>Requires <paramref name="excitation"/> and <paramref name="impulse"/> to match in a length of a power of 2.
+        /// This version of convolution rolls back if the convolution result is longer than the initial signal length.</remarks>
+        public static Complex[] ConvolveFourier(float[] excitation, float[] impulse) {
+            using FFTCache cache = new FFTCache(excitation.Length);
+            return ConvolveFourier(excitation, impulse, cache);
+        }
+
+        /// <summary>
+        /// Performs the convolution of two real signals. The FFT of the result is returned.
+        /// </summary>
+        /// <remarks>Requires <paramref name="excitation"/> and <paramref name="impulse"/> to match in a length of a power of 2.
+        /// This version of convolution rolls back if the convolution result is longer than the initial signal length.</remarks>
+        public static Complex[] ConvolveFourier(float[] excitation, float[] impulse, FFTCache cache) {
+            Complex[] excitationFFT = excitation.FFT(cache);
+            excitationFFT.Convolve(impulse.FFT(cache));
+            return excitationFFT;
+        }
+
+        /// <summary>
+        /// Performs the convolution of two real signals of any length and without rolling back the signal. The real result is returned.
+        /// </summary>
+        public static float[] ConvolveSafe(float[] excitation, float[] impulse) {
+            using FFTCache tempCache = new ThreadSafeFFTCache(1 << QMath.Log2Ceil(excitation.Length + impulse.Length));
+            return ConvolveSafe(excitation, impulse, tempCache);
+        }
+
+        /// <summary>
+        /// Performs the convolution of two real signals of any length and without rolling back the signal. The real result is returned.
+        /// </summary>
+        /// <remarks>The size of the <paramref name="cache"/> has to equal 2 ^ ceil(log2(<paramref name="excitation"/>.Length + <paramref name="impulse"/>.Length)).</remarks>
+        public static float[] ConvolveSafe(float[] excitation, float[] impulse, FFTCache cache) {
+            float[] real = new float[1 << QMath.Log2Ceil(excitation.Length + impulse.Length)];
+            Array.Copy(excitation, real, excitation.Length);
+            Complex[] excitationFFT = real.FFT(cache);
+
+            Array.Copy(impulse, real, impulse.Length);
+            Array.Clear(real, impulse.Length, real.Length - impulse.Length);
+            Complex[] impulseFFT = real.FFT(cache);
+
+            excitationFFT.Convolve(impulseFFT);
+            excitationFFT.InPlaceIFFT();
+            excitationFFT.GetRealPart(real);
+            return real;
+        }
+    }
+}

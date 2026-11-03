@@ -1,0 +1,85 @@
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+
+using Cavern.Utilities;
+
+namespace Cavern.Waveforms {
+    /// <summary>
+    /// Contains multiple arrays of the same length.
+    /// </summary>
+    public abstract class MultichannelBase<T> : ICloneable, IEnumerable<T[]> where T : struct {
+        /// <summary>
+        /// Get a <paramref name="channel"/>'s <see cref="data"/>.
+        /// </summary>
+        public T[] this[int channel] {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get {
+                data.AssertInBounds(nameof(data), channel);
+                return data[channel];
+            }
+        }
+
+        /// <summary>
+        /// The number of channels contained in this data.
+        /// </summary>
+        public int Channels {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => data.Length;
+        }
+
+        /// <summary>
+        /// The length of a single channel's <see cref="data"/>.
+        /// </summary>
+        public int Length {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => data != null && data.Length > 0 ? data[0].Length : 0;
+        }
+
+        /// <summary>
+        /// Each channel's samples or other stored data.
+        /// </summary>
+        protected readonly T[][] data;
+
+        /// <summary>
+        /// Encapsulate multichannel data.
+        /// </summary>
+        protected MultichannelBase(params T[][] source) {
+            source.AssertElementsNotNull();
+            for (int i = 1; i < source.Length; i++) {
+                if (source[0].LongLength != source[i].LongLength) {
+                    throw new DifferentSignalLengthsException();
+                }
+            }
+            data = source;
+        }
+
+        /// <summary>
+        /// Construct an empty multichannel data of a given size.
+        /// </summary>
+        protected MultichannelBase(int channels, int itemsPerChannel) {
+            channels.ThrowIfNegative(nameof(channels));
+            itemsPerChannel.ThrowIfNegative(nameof(itemsPerChannel));
+
+            data = new T[channels][];
+            for (int channel = 0; channel < channels; channel++) {
+                data[channel] = new T[itemsPerChannel];
+            }
+        }
+
+        /// <inheritdoc/>
+        public abstract object Clone();
+
+        /// <summary>
+        /// Get an array referencing the contained channel entries.
+        /// </summary>
+        public T[][] ToArray() => data.DeepCopy2D();
+
+        /// <inheritdoc/>
+        public IEnumerator<T[]> GetEnumerator() => ((IEnumerable<T[]>)data).GetEnumerator();
+
+        /// <inheritdoc/>
+        IEnumerator IEnumerable.GetEnumerator() => data.GetEnumerator();
+    }
+}

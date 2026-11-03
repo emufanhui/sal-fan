@@ -1,0 +1,1364 @@
+diff --git a/audio/sysvad/EndpointsCommon/minwavert.cpp b/audio/sysvad/EndpointsCommon/minwavert.cpp
+index c6b8e8c..99ba02d 100644
+--- a/audio/sysvad/EndpointsCommon/minwavert.cpp
++++ b/audio/sysvad/EndpointsCommon/minwavert.cpp
+@@ -24,6 +24,7 @@ Abstract:
+ #include "minwavertstream.h"
+ #include "IHVPrivatePropertySet.h"
+ #include "AudioModuleHelper.h"
++#include "matcapture.h"
+ 
+ 
+ #define EFFECTS_LIST_COUNT 2
+@@ -746,6 +747,13 @@ Return Value:
+     {
+         stream->Release();
+     }
++
++    MatCaptureRecordFormatEvent(
++        MatCaptureFormatEventNewStream,
++        Pin,
++        Capture,
++        ntStatus,
++        DataFormat);
+     
+     return ntStatus;
+ } // NewStream
+@@ -1466,7 +1474,14 @@ CMiniportWaveRT::IsFormatSupported
+ 
+     if (_ulPin >= m_pMiniportPair->WaveDescriptor->PinCount)
+     {
+-        return STATUS_INVALID_PARAMETER;
++        ntStatus = STATUS_INVALID_PARAMETER;
++        MatCaptureRecordFormatEvent(
++            MatCaptureFormatEventIsFormatSupported,
++            _ulPin,
++            _bCapture,
++            ntStatus,
++            _pDataFormat);
++        return ntStatus;
+     }
+ 
+     cPinFormats = GetPinSupportedDeviceFormats(_ulPin, &pPinFormats);
+@@ -1510,6 +1525,12 @@ CMiniportWaveRT::IsFormatSupported
+         break;
+     }
+ 
++    MatCaptureRecordFormatEvent(
++        MatCaptureFormatEventIsFormatSupported,
++        _ulPin,
++        _bCapture,
++        ntStatus,
++        _pDataFormat);
+     return ntStatus;
+ }
+ 
+diff --git a/audio/sysvad/EndpointsCommon/minwavertstream.cpp b/audio/sysvad/EndpointsCommon/minwavertstream.cpp
+index adea0c8..7b7f403 100644
+--- a/audio/sysvad/EndpointsCommon/minwavertstream.cpp
++++ b/audio/sysvad/EndpointsCommon/minwavertstream.cpp
+@@ -6,6 +6,7 @@
+ #include "minwavertstream.h"
+ #include "UnittestData.h"
+ #include "AudioModuleHelper.h"
++#include "matcapture.h"
+ #define MINWAVERTSTREAM_POOLTAG 'SRWM'
+ 
+ #pragma warning (disable : 4127)
+@@ -300,7 +301,15 @@ Return Value:
+     }
+     m_ulPin = Pin_;
+     m_bCapture = Capture_;
+-    m_ulDmaMovementRate = pWfEx->nAvgBytesPerSec;
++    // WaveRT advances through the transport buffer, not through the encoded
++    // payload. Some legacy MAT clients report an nAvgBytesPerSec value that is
++    // half the 8-channel HBR carrier rate. Derive the physical byte rate from
++    // the frame geometry so the simulated DMA clock cannot run at half speed.
++    const ULONGLONG transportBytesPerSecond =
++        static_cast<ULONGLONG>(pWfEx->nSamplesPerSec) * pWfEx->nBlockAlign;
++    m_ulDmaMovementRate = transportBytesPerSecond != 0 && transportBytesPerSecond <= MAXULONG
++        ? static_cast<ULONG>(transportBytesPerSecond)
++        : pWfEx->nAvgBytesPerSec;
+ 
+     m_pDpc = (PRKDPC)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(KDPC), MINWAVERTSTREAM_POOLTAG);
+     if (!m_pDpc)
+@@ -1011,59 +1020,55 @@ NTSTATUS CMiniportWaveRTStream::SetWritePacket
+ )
+ {
+     NTSTATUS ntStatus;
++    ULONG oldLastOsWritePacket = m_ulLastOsWritePacket;
+ 
+     // The call must be from event driven mode
+     if (m_ulNotificationsPerBuffer == 0)
+     {
+-        return STATUS_NOT_SUPPORTED;
++        ntStatus = STATUS_NOT_SUPPORTED;
++        MatCaptureRecordPacketEvent(
++            this, m_pWfExt, PacketNumber, oldLastOsWritePacket, m_KsState,
++            ntStatus, m_ulDmaBufferSize, m_ulNotificationsPerBuffer,
++            m_ulNotificationIntervalMs);
++        return ntStatus;
+     }
+ 
+-    ULONG oldLastOsWritePacket = m_ulLastOsWritePacket;
+-
+     // This function should not be called once EoS has been set.
+     if (m_bEoSReceived)
+     {
+-        return STATUS_INVALID_DEVICE_STATE;
++        ntStatus = STATUS_INVALID_DEVICE_STATE;
++        MatCaptureRecordPacketEvent(
++            this, m_pWfExt, PacketNumber, oldLastOsWritePacket, m_KsState,
++            ntStatus, m_ulDmaBufferSize, m_ulNotificationsPerBuffer,
++            m_ulNotificationIntervalMs);
++        return ntStatus;
+     }
+ 
+-    KIRQL oldIrql;
+-    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+-    // 1-based count of completed packets, 0-based packet number of current packet
+-    LONGLONG currentPacket = m_llPacketCounter;
+-    KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+-
+-    // If not running, the current packet hasn't actually started transfering so OS should be writing
+-    // to the current packet. If running, then the current packing is already transfering to hardware
+-    // so the OS should write the packet after the current packet.
+-    ULONG expectedPacket = LODWORD(currentPacket);
+-    if (m_KsState == KSSTATE_RUN)
+-    {
+-        expectedPacket++;
+-    }
+-
+-    // Check if OS PacketNumber is behind or too far ahead of current packet
+-    LONG deltaFromExpectedPacket = PacketNumber - expectedPacket;   // Modulo arithemetic
+-    if (deltaFromExpectedPacket < 0)
+-    {
+-        return STATUS_DATA_LATE_ERROR;
+-    }
+-    else if (deltaFromExpectedPacket > 0)
+-    {
+-        return STATUS_DATA_OVERRUN;
+-    }
++    // This software sink has no hardware DMA queue to overrun. PortCls owns
++    // packet scheduling and may legitimately skip a number after a startup
++    // glitch or discontinuity. Accept the packet it has committed instead of
++    // permanently rejecting every later packet relative to a stale counter.
+ 
+     ULONG packetSize = (m_ulDmaBufferSize / m_ulNotificationsPerBuffer);
+     ULONG packetIndex = PacketNumber % m_ulNotificationsPerBuffer;
+-    ULONG ulCurrentWritePosition = packetIndex * packetSize;
++    ULONG packetOffset = packetIndex * packetSize;
++    ULONG ulCurrentWritePosition = packetOffset;
++    ULONG committedBytes = packetSize;
+ 
+     // Check if EOS flag was passed
+     if (Flags & KSSTREAM_HEADER_OPTIONSF_ENDOFSTREAM)
+     {
+         if (EosPacketLength > packetSize)
+         {
+-            return STATUS_INVALID_PARAMETER;
++            ntStatus = STATUS_INVALID_PARAMETER;
++            MatCaptureRecordPacketEvent(
++                this, m_pWfExt, PacketNumber, oldLastOsWritePacket, m_KsState,
++                ntStatus, m_ulDmaBufferSize, m_ulNotificationsPerBuffer,
++                m_ulNotificationIntervalMs);
++            return ntStatus;
+         }
+         else {
++            committedBytes = EosPacketLength;
+             // EOS position will be after the total completed packets, plus the packet in progress,
+             // plus this EOS packet length
+             m_ulLastOsWritePacket = PacketNumber;
+@@ -1080,6 +1085,7 @@ NTSTATUS CMiniportWaveRTStream::SetWritePacket
+         // Will not return an error when the passed in parameter is 0.
+         // Will also check if this function was called with the same write position(in event mode only)
+         // Underruning will also be checked via timer mechanism
++        KIRQL oldIrql;
+         KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+         ntStatus = SetCurrentWritePositionInternal(ulCurrentWritePosition);
+         KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+@@ -1089,6 +1095,18 @@ NTSTATUS CMiniportWaveRTStream::SetWritePacket
+     {
+         m_ulLastOsWritePacket = oldLastOsWritePacket;
+     }
++    else if (committedBytes != 0)
++    {
++        // Capture the packet after PortCls commits it. Reading only from the
++        // simulated DMA clock can otherwise copy stale circular-buffer data
++        // when a client submits a packet close to its playback deadline.
++        MatCaptureWrite(m_pWfExt, m_pDmaBuffer + packetOffset, committedBytes);
++    }
++
++    MatCaptureRecordPacketEvent(
++        this, m_pWfExt, PacketNumber, oldLastOsWritePacket, m_KsState,
++        ntStatus, m_ulDmaBufferSize, m_ulNotificationsPerBuffer,
++        m_ulNotificationIntervalMs);
+ 
+     return ntStatus;
+ }
+@@ -1469,11 +1487,8 @@ VOID CMiniportWaveRTStream::UpdatePosition
+                                         0);
+         }
+ 
+-        if (!g_DoNotCreateDataFiles)
+-        {
+-            // Read from buffer and write to a file.
+-            ReadBytes(ByteDisplacement);
+-        }
++        // The MAT ring is independent of the optional diagnostic file dump.
++        ReadBytes(ByteDisplacement);
+     }
+     
+     // Increment the DMA position by the number of bytes displaced since the last
+@@ -1547,7 +1562,16 @@ ByteDisplacement - # of bytes to process.
+     while (ByteDisplacement > 0)
+     {
+         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
+-        m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);
++        // Event-driven streams are captured at SetWritePacket(), where packet
++        // ownership is unambiguous. Keep this path for legacy polling streams.
++        if (m_ulNotificationsPerBuffer == 0)
++        {
++            MatCaptureWrite(m_pWfExt, m_pDmaBuffer + bufferOffset, runWrite);
++        }
++        if (!g_DoNotCreateDataFiles)
++        {
++            m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);
++        }
+         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
+         ByteDisplacement -= runWrite;
+     }
+diff --git a/audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj b/audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
+index a37a16b..fc040ca 100644
+--- a/audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
++++ b/audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
+@@ -80,7 +80,7 @@
+   <ItemGroup Label="WrappedTaskItems" />
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <Link>
+-      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib</AdditionalDependencies>
++      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
+     </Link>
+     <ResourceCompile>
+       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
+@@ -103,7 +103,7 @@
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
+     <Link>
+-      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib</AdditionalDependencies>
++      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
+     </Link>
+     <ResourceCompile>
+       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
+@@ -126,7 +126,7 @@
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <Link>
+-      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib</AdditionalDependencies>
++      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
+     </Link>
+     <ResourceCompile>
+       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
+@@ -149,7 +149,7 @@
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
+     <Link>
+-      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib</AdditionalDependencies>
++      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\portcls.lib;$(DDK_LIB_PATH)\stdunk.lib;$(DDK_LIB_PATH)\libcntpr.lib;$(DDK_LIB_PATH)\wdmsec.lib</AdditionalDependencies>
+     </Link>
+     <ResourceCompile>
+       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);..</AdditionalIncludeDirectories>
+@@ -290,6 +290,7 @@
+     <ClCompile Include="..\common.cpp" />
+     <ClCompile Include="..\hw.cpp" />
+     <ClCompile Include="..\kshelper.cpp" />
++    <ClCompile Include="..\matcapture.cpp" />
+     <ClCompile Include="..\savedata.cpp" />
+     <ClCompile Include="..\tonegenerator.cpp" />
+     <ClCompile Include="..\UsbHsDevice.cpp" />
+@@ -311,4 +312,4 @@
+     <ClInclude Exclude="@(ClInclude)" Include="*.h;*.hpp;*.hxx;*.hm;*.inl;*.xsd" />
+   </ItemGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+-</Project>
+\ No newline at end of file
++</Project>
+diff --git a/audio/sysvad/TabletAudioSample/hdmitopo.cpp b/audio/sysvad/TabletAudioSample/hdmitopo.cpp
+index d187f46..292935f 100644
+--- a/audio/sysvad/TabletAudioSample/hdmitopo.cpp
++++ b/audio/sysvad/TabletAudioSample/hdmitopo.cpp
+@@ -314,7 +314,7 @@ Return Value:
+ 
+ //=============================================================================
+ 
+-#define SINK_DESC_STR L"SinkDescription Sample"
++#define SINK_DESC_STR L"1 - HISENSE"
+ 
+ NTSTATUS
+ CHdmiMiniportTopology::PropertyHandlerJackSinkInfo
+@@ -389,11 +389,14 @@ Return Value:
+                         // Init sink info data (example follows).
+                         //
+                         sinkInfo->ConnType              = KSJACK_SINK_CONNECTIONTYPE_HDMI;
+-                        sinkInfo->ManufacturerId        = 0;
+-                        sinkInfo->ProductId             = 0;
++                        // Match the validated HISENSE Atmos endpoint used by this virtual sink.
++                        sinkInfo->ManufacturerId        = 0xA320;
++                        sinkInfo->ProductId             = 0x0030;
+                         sinkInfo->AudioLatency          = 0;
+                         sinkInfo->HDCPCapable           = TRUE;
+-                        sinkInfo->AICapable             = TRUE;
++                        sinkInfo->AICapable             = FALSE;
++                        sinkInfo->PortId.HighPart       = static_cast<LONG>(0x8C2242F7u);
++                        sinkInfo->PortId.LowPart        = 0xF30FD0AE;
+                         
+                         cchLength = sizeof(SINK_DESC_STR)/sizeof(WCHAR) - 1; // -1 to remove the null wchar.
+                         if (cchLength < MAX_SINK_DESCRIPTION_NAME_LENGTH)
+diff --git a/audio/sysvad/TabletAudioSample/hdmitoptable.h b/audio/sysvad/TabletAudioSample/hdmitoptable.h
+index c360d79..0d02bac 100644
+--- a/audio/sysvad/TabletAudioSample/hdmitoptable.h
++++ b/audio/sysvad/TabletAudioSample/hdmitoptable.h
+@@ -165,11 +165,11 @@ PCPIN_DESCRIPTOR HdmiTopoMiniportPins[] =
+ static
+ KSJACK_DESCRIPTION HdmiJackDesc =
+ {
+-    KSAUDIO_SPEAKER_STEREO,
++    KSAUDIO_SPEAKER_7POINT1_SURROUND,
+     0x0000,               // no color
+     eConnTypeOtherDigital,
+     eGeoLocHDMI,
+-    eGenLocPrimaryBox,
++    eGenLocSeparate,
+     ePortConnJack,
+     TRUE
+ };
+diff --git a/audio/sysvad/TabletAudioSample/hdmiwavtable.h b/audio/sysvad/TabletAudioSample/hdmiwavtable.h
+index bd0f923..2318766 100644
+--- a/audio/sysvad/TabletAudioSample/hdmiwavtable.h
++++ b/audio/sysvad/TabletAudioSample/hdmiwavtable.h
+@@ -24,14 +24,16 @@ Abstract:
+ //=============================================================================
+ 
+ 
+-#define HDMI_DEVICE_MAX_CHANNELS                 2       // Max Channels.
++#define HDMI_DEVICE_MAX_CHANNELS                 12      // Max Channels.
+ 
+-#define HDMI_HOST_MAX_CHANNELS                   2       // Max Channels.
++#define HDMI_HOST_MAX_CHANNELS                   12      // Max Channels.
+ #define HDMI_HOST_MIN_BITS_PER_SAMPLE            16      // Min Bits Per Sample
+-#define HDMI_HOST_MAX_BITS_PER_SAMPLE            16      // Max Bits Per Sample
++#define HDMI_HOST_MAX_BITS_PER_SAMPLE            32      // 24 valid bits in a 32-bit container.
+ #define HDMI_HOST_MIN_SAMPLE_RATE                44100   // Min Sample Rate
+ #define HDMI_HOST_MAX_SAMPLE_RATE                96000   // Max Sample Rate
+ 
++#define HDMI_PCM_7POINT1POINT4_CHANNEL_MASK      0x0002D63F
++
+ #define HDMI_LOOPBACK_MAX_CHANNELS               HDMI_HOST_MAX_CHANNELS          // Must be equal to host pin's Max Channels.
+ #define HDMI_LOOPBACK_MIN_BITS_PER_SAMPLE        HDMI_HOST_MIN_BITS_PER_SAMPLE   // Must be equal to host pin's Min Bits Per Sample
+ #define HDMI_LOOPBACK_MAX_BITS_PER_SAMPLE        HDMI_HOST_MAX_BITS_PER_SAMPLE   // Must be equal to host pin's Max Bits Per Sample
+@@ -173,6 +175,81 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE HdmiHostPinSupportedDeviceFormats[] =
+             STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
+         }
+     },
++    { // PCM 7.1 / 48 kHz / 16 bit
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                8,
++                48000,
++                768000,
++                16,
++                16,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            16,
++            KSAUDIO_SPEAKER_7POINT1_SURROUND,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
++        }
++    },
++    { // PCM 7.1 / 48 kHz / 24 valid bits in 32
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                8,
++                48000,
++                1536000,
++                32,
++                32,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            24,
++            KSAUDIO_SPEAKER_7POINT1_SURROUND,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
++        }
++    },
++    { // PCM 7.1.4 / 48 kHz / 16 bit
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                12,
++                48000,
++                1152000,
++                24,
++                16,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            16,
++            HDMI_PCM_7POINT1POINT4_CHANNEL_MASK,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
++        }
++    },
+     { // 4
+         {
+             sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
+@@ -273,6 +350,31 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE HdmiHostPinSupportedDeviceFormats[] =
+             STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MLP)
+         }
+     },
++    { // Dolby MLP / MAT 1.0 without a channel mask, as requested by Battlefield 1
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MLP),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                8,
++                192000,
++                3072000,
++                16,
++                16,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            16,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MLP)
++        }
++    },
+     { // 8
+         {
+             sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
+@@ -422,6 +524,131 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE HdmiHostPinSupportedDeviceFormats[] =
+             KSAUDIO_SPEAKER_7POINT1,
+             STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MAT21)
+         }
++    },
++    { // DTS-HD with the 7.1 Surround channel mask used by Windows spatial audio
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DTS_HD),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                8,
++                192000,
++                3072000,
++                16,
++                16,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            16,
++            KSAUDIO_SPEAKER_7POINT1_SURROUND,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DTS_HD)
++        }
++    },
++    { // DTS:X E1 with the 7.1 Surround channel mask
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DTSX_E1),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                8,
++                192000,
++                3072000,
++                16,
++                16,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            16,
++            KSAUDIO_SPEAKER_7POINT1_SURROUND,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DTSX_E1)
++        }
++    },
++    { // DTS:X E2 with the 7.1 Surround channel mask
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DTSX_E2),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                8,
++                192000,
++                3072000,
++                16,
++                16,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            16,
++            KSAUDIO_SPEAKER_7POINT1_SURROUND,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DTSX_E2)
++        }
++    },
++    { // Dolby MAT 2.0 with the 7.1 Surround channel mask
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MAT20),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                8,
++                192000,
++                3072000,
++                16,
++                16,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            16,
++            KSAUDIO_SPEAKER_7POINT1_SURROUND,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MAT20)
++        }
++    },
++    { // Dolby MAT 2.1 with the 7.1 Surround channel mask
++        {
++            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
++            0,
++            0,
++            0,
++            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MAT21),
++            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
++        },
++        {
++            {
++                WAVE_FORMAT_EXTENSIBLE,
++                8,
++                192000,
++                3072000,
++                16,
++                16,
++                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
++            },
++            16,
++            KSAUDIO_SPEAKER_7POINT1_SURROUND,
++            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MAT21)
++        }
+     }
+ };
+ 
+diff --git a/audio/sysvad/adapter.cpp b/audio/sysvad/adapter.cpp
+index 0f44c59..2a979a5 100644
+--- a/audio/sysvad/adapter.cpp
++++ b/audio/sysvad/adapter.cpp
+@@ -23,6 +23,7 @@ Abstract:
+ #include <sysvad.h>
+ #include <ContosoKeywordDetector.h>
+ #include "IHVPrivatePropertySet.h"
++#include "matcapture.h"
+ 
+ #include "simple.h"
+ #include "minipairs.h"
+@@ -249,7 +250,7 @@ DRIVER_DISPATCH PnpHandler;
+ // Rendering streams are not saved to a file by default. Use the registry value 
+ // DoNotCreateDataFiles (DWORD) = 0 to override this default.
+ //
+-DWORD g_DoNotCreateDataFiles = 1;  // default is off.
++DWORD g_DoNotCreateDataFiles = 1;  // The MAT ring is the primary capture path.
+ DWORD g_DisableToneGenerator = 0;  // default is to generate tones.
+ UNICODE_STRING g_RegistryPath;      // This is used to store the registry settings path for the driver
+ 
+@@ -328,6 +329,11 @@ Environment:
+ 
+     ReleaseRegistryStringBuffer();
+ 
++    if (DriverObject != NULL)
++    {
++        MatCaptureShutdown(DriverObject);
++    }
++
+     if (DriverObject == NULL)
+     {
+         goto Done;
+@@ -589,6 +595,12 @@ Return Value:
+     gPCDriverUnloadRoutine = DriverObject->DriverUnload;
+     DriverObject->DriverUnload = DriverUnload;
+ 
++    ntStatus = MatCaptureInitialize(DriverObject);
++    IF_FAILED_ACTION_JUMP(
++        ntStatus,
++        DPF(D_ERROR, ("MatCaptureInitialize failed, 0x%x", ntStatus)),
++        Done);
++
+     //
+     // All done.
+     //
+diff --git a/audio/sysvad/common.cpp b/audio/sysvad/common.cpp
+index 1334411..6f5d150 100644
+--- a/audio/sysvad/common.cpp
++++ b/audio/sysvad/common.cpp
+@@ -2384,7 +2384,7 @@ CAdapterCommon::UpdatePowerRelations(_In_ PIRP Irp)
+ 
+     if (0 == qprPdosCount)
+     {
+-        DPF(D_ERROR, ("CAdapterCommon::UpdatePowerRelations: No PDOs in power relations"));
++        DPF(D_VERBOSE, ("CAdapterCommon::UpdatePowerRelations: No PDOs in power relations"));
+         // Not an error. Just nothing to do.
+         newRelations = (PDEVICE_RELATIONS)(Irp->IoStatus.Information);
+         goto Exit;
+diff --git a/audio/sysvad/matcapture.cpp b/audio/sysvad/matcapture.cpp
+new file mode 100644
+index 0000000..fea28ba
+--- /dev/null
++++ b/audio/sysvad/matcapture.cpp
+@@ -0,0 +1,551 @@
++#include <sysvad.h>
++#include <wdmsec.h>
++#include "matcapture.h"
++
++#define MAT_CAPTURE_POOLTAG 'rCtM'
++#define MAT_CAPTURE_CAPACITY (4U * 1024U * 1024U)
++#define MAT_CAPTURE_FORMAT_EVENT_CAPACITY 512U
++
++namespace
++{
++    const GUID MatCaptureDeviceClassGuid =
++        {0x31ca452a, 0x6e3f, 0x4a6a, {0xb2, 0xe6, 0x79, 0x96, 0xf9, 0xa8, 0x3f, 0x92}};
++
++    PDEVICE_OBJECT g_ControlDevice = nullptr;
++    PDRIVER_DISPATCH g_OriginalCreate = nullptr;
++    PDRIVER_DISPATCH g_OriginalClose = nullptr;
++    PDRIVER_DISPATCH g_OriginalDeviceControl = nullptr;
++    BYTE* g_Buffer = nullptr;
++    KSPIN_LOCK g_Lock;
++    ULONGLONG g_WriteSequence = 0;
++    ULONGLONG g_ReadSequence = 0;
++    ULONGLONG g_BytesReadByClient = 0;
++    ULONGLONG g_DroppedBytes = 0;
++    GUID g_SubFormat = GUID_NULL;
++    ULONGLONG g_FormatChanges = 0;
++    ULONG g_SampleRate = 0;
++    ULONG g_ChannelMask = 0;
++    USHORT g_Channels = 0;
++    USHORT g_BitsPerSample = 0;
++    USHORT g_ValidBitsPerSample = 0;
++    USHORT g_BlockAlign = 0;
++    MAT_CAPTURE_FORMAT_EVENT g_FormatEvents[MAT_CAPTURE_FORMAT_EVENT_CAPACITY] = {};
++    ULONGLONG g_TotalFormatRecords = 0;
++
++    void AppendFormatEvent(_Inout_ MAT_CAPTURE_FORMAT_EVENT* Event)
++    {
++        KIRQL oldIrql;
++        KeAcquireSpinLock(&g_Lock, &oldIrql);
++        Event->Sequence = ++g_TotalFormatRecords;
++        g_FormatEvents[static_cast<ULONG>(
++            (Event->Sequence - 1) % MAT_CAPTURE_FORMAT_EVENT_CAPACITY)] = *Event;
++        KeReleaseSpinLock(&g_Lock, oldIrql);
++    }
++
++    bool IsCapturedFormat(_In_ const WAVEFORMATEXTENSIBLE* Format)
++    {
++        const GUID& SubFormat = Format->SubFormat;
++        if (IsEqualGUIDAligned(SubFormat, KSDATAFORMAT_SUBTYPE_PCM))
++        {
++            return Format->Format.nChannels == 12 &&
++                Format->Format.nSamplesPerSec == 48000 &&
++                Format->dwChannelMask == 0x0002D63F &&
++                Format->Format.nBlockAlign != 0 &&
++                (Format->Format.wBitsPerSample == 16 ||
++                 Format->Format.wBitsPerSample == 32);
++        }
++        return IsEqualGUIDAligned(SubFormat, KSDATAFORMAT_SUBTYPE_IEC61937_DTS) ||
++            IsEqualGUIDAligned(SubFormat, KSDATAFORMAT_SUBTYPE_IEC61937_DTS_HD) ||
++            IsEqualGUIDAligned(SubFormat, KSDATAFORMAT_SUBTYPE_IEC61937_DTSX_E1) ||
++            IsEqualGUIDAligned(SubFormat, KSDATAFORMAT_SUBTYPE_IEC61937_DTSX_E2) ||
++            IsEqualGUIDAligned(SubFormat, KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MLP) ||
++            IsEqualGUIDAligned(SubFormat, KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MAT20) ||
++            IsEqualGUIDAligned(SubFormat, KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_MAT21);
++    }
++
++    bool IsSameFormat(_In_ const WAVEFORMATEXTENSIBLE* Format)
++    {
++        return IsEqualGUIDAligned(g_SubFormat, Format->SubFormat) &&
++            g_SampleRate == Format->Format.nSamplesPerSec &&
++            g_ChannelMask == Format->dwChannelMask &&
++            g_Channels == Format->Format.nChannels &&
++            g_BitsPerSample == Format->Format.wBitsPerSample &&
++            g_ValidBitsPerSample == Format->Samples.wValidBitsPerSample &&
++            g_BlockAlign == Format->Format.nBlockAlign;
++    }
++
++    void SetFormat(_In_ const WAVEFORMATEXTENSIBLE* Format)
++    {
++        g_SubFormat = Format->SubFormat;
++        g_SampleRate = Format->Format.nSamplesPerSec;
++        g_ChannelMask = Format->dwChannelMask;
++        g_Channels = Format->Format.nChannels;
++        g_BitsPerSample = Format->Format.wBitsPerSample;
++        g_ValidBitsPerSample = Format->Samples.wValidBitsPerSample;
++        g_BlockAlign = Format->Format.nBlockAlign;
++    }
++
++    void ClearFormat()
++    {
++        g_SubFormat = GUID_NULL;
++        g_SampleRate = 0;
++        g_ChannelMask = 0;
++        g_Channels = 0;
++        g_BitsPerSample = 0;
++        g_ValidBitsPerSample = 0;
++        g_BlockAlign = 0;
++    }
++
++    NTSTATUS CompleteIrp(_In_ PIRP Irp, _In_ NTSTATUS Status, _In_ ULONG_PTR Information)
++    {
++        Irp->IoStatus.Status = Status;
++        Irp->IoStatus.Information = Information;
++        IoCompleteRequest(Irp, IO_NO_INCREMENT);
++        return Status;
++    }
++
++    PDRIVER_DISPATCH OriginalDispatch(_In_ UCHAR MajorFunction)
++    {
++        switch (MajorFunction)
++        {
++        case IRP_MJ_CREATE:
++            return g_OriginalCreate;
++        case IRP_MJ_CLOSE:
++            return g_OriginalClose;
++        case IRP_MJ_DEVICE_CONTROL:
++            return g_OriginalDeviceControl;
++        default:
++            return nullptr;
++        }
++    }
++
++    NTSTATUS DispatchCreateClose(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
++    {
++        const UCHAR majorFunction = IoGetCurrentIrpStackLocation(Irp)->MajorFunction;
++        if (DeviceObject != g_ControlDevice)
++        {
++            PDRIVER_DISPATCH original = OriginalDispatch(majorFunction);
++            if (original != nullptr)
++            {
++                return original(DeviceObject, Irp);
++            }
++            return CompleteIrp(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
++        }
++
++        return CompleteIrp(Irp, STATUS_SUCCESS, 0);
++    }
++
++    NTSTATUS ReadCaptureData(_In_ PIRP Irp, _In_ ULONG OutputBytes)
++    {
++        const ULONG headerBytes = sizeof(MAT_CAPTURE_READ_HEADER);
++        if (OutputBytes < headerBytes || Irp->AssociatedIrp.SystemBuffer == nullptr)
++        {
++            return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, headerBytes);
++        }
++
++        auto header = static_cast<PMAT_CAPTURE_READ_HEADER>(Irp->AssociatedIrp.SystemBuffer);
++        BYTE* output = reinterpret_cast<BYTE*>(header) + headerBytes;
++        const ULONG outputCapacity = OutputBytes - headerBytes;
++        KIRQL oldIrql;
++
++        KeAcquireSpinLock(&g_Lock, &oldIrql);
++        const ULONGLONG available64 = g_WriteSequence - g_ReadSequence;
++        const ULONG available = static_cast<ULONG>(min(available64, static_cast<ULONGLONG>(MAXULONG)));
++        const ULONG payloadBytes = min(available, outputCapacity);
++        const ULONGLONG firstSequence = g_ReadSequence;
++        const ULONG firstOffset = static_cast<ULONG>(g_ReadSequence % MAT_CAPTURE_CAPACITY);
++        const ULONG firstBytes = min(payloadBytes, MAT_CAPTURE_CAPACITY - firstOffset);
++
++        if (firstBytes != 0)
++        {
++            RtlCopyMemory(output, g_Buffer + firstOffset, firstBytes);
++        }
++        if (payloadBytes > firstBytes)
++        {
++            RtlCopyMemory(output + firstBytes, g_Buffer, payloadBytes - firstBytes);
++        }
++        g_ReadSequence += payloadBytes;
++        g_BytesReadByClient += payloadBytes;
++
++        header->Version = MAT_CAPTURE_PROTOCOL_VERSION;
++        header->HeaderBytes = headerBytes;
++        header->PayloadBytes = payloadBytes;
++        header->Reserved = 0;
++        header->FirstByteSequence = firstSequence;
++        header->TotalBytesWritten = g_WriteSequence;
++        header->DroppedBytes = g_DroppedBytes;
++        header->SubFormat = g_SubFormat;
++        header->FormatChanges = g_FormatChanges;
++        header->SampleRate = g_SampleRate;
++        header->ChannelMask = g_ChannelMask;
++        header->Channels = g_Channels;
++        header->BitsPerSample = g_BitsPerSample;
++        header->ValidBitsPerSample = g_ValidBitsPerSample;
++        header->BlockAlign = g_BlockAlign;
++        KeReleaseSpinLock(&g_Lock, oldIrql);
++
++        return CompleteIrp(Irp, STATUS_SUCCESS, headerBytes + payloadBytes);
++    }
++
++    NTSTATUS GetCaptureStats(_In_ PIRP Irp, _In_ ULONG OutputBytes)
++    {
++        if (OutputBytes < sizeof(MAT_CAPTURE_STATS) || Irp->AssociatedIrp.SystemBuffer == nullptr)
++        {
++            return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, sizeof(MAT_CAPTURE_STATS));
++        }
++
++        auto stats = static_cast<PMAT_CAPTURE_STATS>(Irp->AssociatedIrp.SystemBuffer);
++        KIRQL oldIrql;
++        KeAcquireSpinLock(&g_Lock, &oldIrql);
++        stats->Version = MAT_CAPTURE_PROTOCOL_VERSION;
++        stats->CapacityBytes = MAT_CAPTURE_CAPACITY;
++        stats->AvailableBytes = static_cast<ULONG>(g_WriteSequence - g_ReadSequence);
++        stats->Reserved = 0;
++        stats->TotalBytesWritten = g_WriteSequence;
++        stats->TotalBytesRead = g_BytesReadByClient;
++        stats->DroppedBytes = g_DroppedBytes;
++        stats->SubFormat = g_SubFormat;
++        stats->FormatChanges = g_FormatChanges;
++        stats->SampleRate = g_SampleRate;
++        stats->ChannelMask = g_ChannelMask;
++        stats->Channels = g_Channels;
++        stats->BitsPerSample = g_BitsPerSample;
++        stats->ValidBitsPerSample = g_ValidBitsPerSample;
++        stats->BlockAlign = g_BlockAlign;
++        KeReleaseSpinLock(&g_Lock, oldIrql);
++
++        return CompleteIrp(Irp, STATUS_SUCCESS, sizeof(MAT_CAPTURE_STATS));
++    }
++
++    NTSTATUS ResetCapture(_In_ PIRP Irp)
++    {
++        KIRQL oldIrql;
++        KeAcquireSpinLock(&g_Lock, &oldIrql);
++        g_WriteSequence = 0;
++        g_ReadSequence = 0;
++        g_BytesReadByClient = 0;
++        g_DroppedBytes = 0;
++        ClearFormat();
++        g_FormatChanges = 0;
++        KeReleaseSpinLock(&g_Lock, oldIrql);
++        return CompleteIrp(Irp, STATUS_SUCCESS, 0);
++    }
++
++    NTSTATUS GetFormatLog(_In_ PIRP Irp, _In_ ULONG OutputBytes)
++    {
++        const ULONG headerBytes = sizeof(MAT_CAPTURE_FORMAT_LOG);
++        if (OutputBytes < headerBytes || Irp->AssociatedIrp.SystemBuffer == nullptr)
++        {
++            return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, headerBytes);
++        }
++
++        auto log = static_cast<PMAT_CAPTURE_FORMAT_LOG>(Irp->AssociatedIrp.SystemBuffer);
++        auto records = reinterpret_cast<PMAT_CAPTURE_FORMAT_EVENT>(
++            reinterpret_cast<BYTE*>(log) + headerBytes);
++        const ULONG outputRecordCapacity =
++            (OutputBytes - headerBytes) / sizeof(MAT_CAPTURE_FORMAT_EVENT);
++
++        KIRQL oldIrql;
++        KeAcquireSpinLock(&g_Lock, &oldIrql);
++        const ULONGLONG retained64 = min(
++            g_TotalFormatRecords,
++            static_cast<ULONGLONG>(MAT_CAPTURE_FORMAT_EVENT_CAPACITY));
++        const ULONG retained = static_cast<ULONG>(retained64);
++        const ULONG recordCount = min(retained, outputRecordCapacity);
++        const ULONGLONG firstSequence =
++            recordCount == 0 ? 0 : g_TotalFormatRecords - recordCount + 1;
++
++        log->Version = MAT_CAPTURE_FORMAT_LOG_VERSION;
++        log->HeaderBytes = headerBytes;
++        log->RecordBytes = sizeof(MAT_CAPTURE_FORMAT_EVENT);
++        log->RecordCount = recordCount;
++        log->FirstSequence = firstSequence;
++        log->TotalRecords = g_TotalFormatRecords;
++        log->DroppedRecords = g_TotalFormatRecords > MAT_CAPTURE_FORMAT_EVENT_CAPACITY
++            ? g_TotalFormatRecords - MAT_CAPTURE_FORMAT_EVENT_CAPACITY
++            : 0;
++
++        for (ULONG index = 0; index < recordCount; ++index)
++        {
++            const ULONGLONG sequence = firstSequence + index;
++            records[index] = g_FormatEvents[
++                static_cast<ULONG>((sequence - 1) % MAT_CAPTURE_FORMAT_EVENT_CAPACITY)];
++        }
++        KeReleaseSpinLock(&g_Lock, oldIrql);
++
++        return CompleteIrp(
++            Irp,
++            STATUS_SUCCESS,
++            headerBytes + recordCount * sizeof(MAT_CAPTURE_FORMAT_EVENT));
++    }
++
++    NTSTATUS ResetFormatLog(_In_ PIRP Irp)
++    {
++        KIRQL oldIrql;
++        KeAcquireSpinLock(&g_Lock, &oldIrql);
++        g_TotalFormatRecords = 0;
++        RtlZeroMemory(g_FormatEvents, sizeof(g_FormatEvents));
++        KeReleaseSpinLock(&g_Lock, oldIrql);
++        return CompleteIrp(Irp, STATUS_SUCCESS, 0);
++    }
++
++    NTSTATUS DispatchDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
++    {
++        if (DeviceObject != g_ControlDevice)
++        {
++            if (g_OriginalDeviceControl != nullptr)
++            {
++                return g_OriginalDeviceControl(DeviceObject, Irp);
++            }
++            return CompleteIrp(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
++        }
++
++        const PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
++        switch (stack->Parameters.DeviceIoControl.IoControlCode)
++        {
++        case IOCTL_MAT_CAPTURE_READ:
++            return ReadCaptureData(Irp, stack->Parameters.DeviceIoControl.OutputBufferLength);
++        case IOCTL_MAT_CAPTURE_GET_STATS:
++            return GetCaptureStats(Irp, stack->Parameters.DeviceIoControl.OutputBufferLength);
++        case IOCTL_MAT_CAPTURE_RESET:
++            return ResetCapture(Irp);
++        case IOCTL_MAT_CAPTURE_GET_FORMAT_LOG:
++            return GetFormatLog(Irp, stack->Parameters.DeviceIoControl.OutputBufferLength);
++        case IOCTL_MAT_CAPTURE_RESET_FORMAT_LOG:
++            return ResetFormatLog(Irp);
++        default:
++            return CompleteIrp(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
++        }
++    }
++}
++
++#pragma code_seg("INIT")
++NTSTATUS MatCaptureInitialize(_In_ PDRIVER_OBJECT DriverObject)
++{
++    UNICODE_STRING deviceName;
++    UNICODE_STRING symbolicLink;
++    UNICODE_STRING securityDescriptor;
++    NTSTATUS status;
++
++    KeInitializeSpinLock(&g_Lock);
++    g_Buffer = static_cast<BYTE*>(ExAllocatePool2(
++        POOL_FLAG_NON_PAGED, MAT_CAPTURE_CAPACITY, MAT_CAPTURE_POOLTAG));
++    if (g_Buffer == nullptr)
++    {
++        return STATUS_INSUFFICIENT_RESOURCES;
++    }
++
++    RtlInitUnicodeString(&deviceName, L"\\Device\\DolbyDecoderMat");
++    RtlInitUnicodeString(&securityDescriptor, L"D:P(A;;GA;;;SY)(A;;GA;;;BA)");
++    status = IoCreateDeviceSecure(
++        DriverObject,
++        0,
++        &deviceName,
++        FILE_DEVICE_UNKNOWN,
++        FILE_DEVICE_SECURE_OPEN,
++        TRUE,
++        &securityDescriptor,
++        &MatCaptureDeviceClassGuid,
++        &g_ControlDevice);
++    if (!NT_SUCCESS(status))
++    {
++        ExFreePoolWithTag(g_Buffer, MAT_CAPTURE_POOLTAG);
++        g_Buffer = nullptr;
++        return status;
++    }
++
++    RtlInitUnicodeString(&symbolicLink, L"\\DosDevices\\DolbyDecoderMat");
++    status = IoCreateSymbolicLink(&symbolicLink, &deviceName);
++    if (!NT_SUCCESS(status))
++    {
++        IoDeleteDevice(g_ControlDevice);
++        g_ControlDevice = nullptr;
++        ExFreePoolWithTag(g_Buffer, MAT_CAPTURE_POOLTAG);
++        g_Buffer = nullptr;
++        return status;
++    }
++
++    g_OriginalCreate = DriverObject->MajorFunction[IRP_MJ_CREATE];
++    g_OriginalClose = DriverObject->MajorFunction[IRP_MJ_CLOSE];
++    g_OriginalDeviceControl = DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
++    DriverObject->MajorFunction[IRP_MJ_CREATE] = DispatchCreateClose;
++    DriverObject->MajorFunction[IRP_MJ_CLOSE] = DispatchCreateClose;
++    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DispatchDeviceControl;
++    g_ControlDevice->Flags |= DO_BUFFERED_IO;
++    g_ControlDevice->Flags &= ~DO_DEVICE_INITIALIZING;
++    return STATUS_SUCCESS;
++}
++
++#pragma code_seg("PAGE")
++VOID MatCaptureShutdown(_In_ PDRIVER_OBJECT DriverObject)
++{
++    PAGED_CODE();
++
++    if (g_OriginalCreate != nullptr)
++    {
++        DriverObject->MajorFunction[IRP_MJ_CREATE] = g_OriginalCreate;
++        DriverObject->MajorFunction[IRP_MJ_CLOSE] = g_OriginalClose;
++        DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = g_OriginalDeviceControl;
++    }
++
++    UNICODE_STRING symbolicLink;
++    RtlInitUnicodeString(&symbolicLink, L"\\DosDevices\\DolbyDecoderMat");
++    IoDeleteSymbolicLink(&symbolicLink);
++
++    if (g_ControlDevice != nullptr)
++    {
++        IoDeleteDevice(g_ControlDevice);
++        g_ControlDevice = nullptr;
++    }
++    if (g_Buffer != nullptr)
++    {
++        ExFreePoolWithTag(g_Buffer, MAT_CAPTURE_POOLTAG);
++        g_Buffer = nullptr;
++    }
++}
++
++#pragma code_seg()
++VOID MatCaptureWrite(
++    _In_ const WAVEFORMATEXTENSIBLE* Format,
++    _In_reads_bytes_(ByteCount) const BYTE* Data,
++    _In_ ULONG ByteCount)
++{
++    if (g_Buffer == nullptr || Format == nullptr || Data == nullptr || ByteCount == 0 ||
++        !IsCapturedFormat(Format))
++    {
++        return;
++    }
++
++    ULONG skippedBytes = 0;
++    if (ByteCount > MAT_CAPTURE_CAPACITY)
++    {
++        skippedBytes = ByteCount - MAT_CAPTURE_CAPACITY;
++        Data += skippedBytes;
++        ByteCount = MAT_CAPTURE_CAPACITY;
++    }
++
++    KIRQL oldIrql;
++    KeAcquireSpinLock(&g_Lock, &oldIrql);
++    if (!IsSameFormat(Format))
++    {
++        if (!IsEqualGUIDAligned(g_SubFormat, GUID_NULL))
++        {
++            ++g_FormatChanges;
++            g_WriteSequence = 0;
++            g_ReadSequence = 0;
++            g_BytesReadByClient = 0;
++            g_DroppedBytes = 0;
++        }
++        SetFormat(Format);
++    }
++    if (skippedBytes != 0)
++    {
++        g_WriteSequence += skippedBytes;
++        if (g_WriteSequence - g_ReadSequence > MAT_CAPTURE_CAPACITY)
++        {
++            const ULONGLONG newReadSequence = g_WriteSequence - MAT_CAPTURE_CAPACITY;
++            g_DroppedBytes += newReadSequence - g_ReadSequence;
++            g_ReadSequence = newReadSequence;
++        }
++    }
++    const ULONGLONG newWriteSequence = g_WriteSequence + ByteCount;
++    if (newWriteSequence - g_ReadSequence > MAT_CAPTURE_CAPACITY)
++    {
++        const ULONGLONG newReadSequence = newWriteSequence - MAT_CAPTURE_CAPACITY;
++        g_DroppedBytes += newReadSequence - g_ReadSequence;
++        g_ReadSequence = newReadSequence;
++    }
++
++    const ULONG firstOffset = static_cast<ULONG>(g_WriteSequence % MAT_CAPTURE_CAPACITY);
++    const ULONG firstBytes = min(ByteCount, MAT_CAPTURE_CAPACITY - firstOffset);
++    RtlCopyMemory(g_Buffer + firstOffset, Data, firstBytes);
++    if (ByteCount > firstBytes)
++    {
++        RtlCopyMemory(g_Buffer, Data + firstBytes, ByteCount - firstBytes);
++    }
++    g_WriteSequence = newWriteSequence;
++    KeReleaseSpinLock(&g_Lock, oldIrql);
++}
++
++VOID MatCaptureRecordFormatEvent(
++    _In_ MAT_CAPTURE_FORMAT_EVENT_TYPE Type,
++    _In_ ULONG Pin,
++    _In_ BOOLEAN Capture,
++    _In_ NTSTATUS Status,
++    _In_opt_ const KSDATAFORMAT* Format)
++{
++    MAT_CAPTURE_FORMAT_EVENT event = {};
++    event.InterruptTime100ns = KeQueryInterruptTime();
++    event.Type = Type;
++    event.Pin = Pin;
++    event.Status = Status;
++    event.Capture = Capture ? 1U : 0U;
++
++    if (Format != nullptr)
++    {
++        event.MajorFormat = Format->MajorFormat;
++        event.DataSubFormat = Format->SubFormat;
++        event.Specifier = Format->Specifier;
++        event.FormatSize = Format->FormatSize;
++
++        const ULONG waveOffset = sizeof(KSDATAFORMAT);
++        if (Format->FormatSize >= waveOffset + sizeof(WAVEFORMATEX))
++        {
++            const auto wave = reinterpret_cast<const WAVEFORMATEX*>(Format + 1);
++            event.FormatTag = wave->wFormatTag;
++            event.Channels = wave->nChannels;
++            event.SampleRate = wave->nSamplesPerSec;
++            event.AverageBytesPerSecond = wave->nAvgBytesPerSec;
++            event.BlockAlign = wave->nBlockAlign;
++            event.BitsPerSample = wave->wBitsPerSample;
++            event.ExtraSize = wave->cbSize;
++
++            if (wave->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
++                Format->FormatSize >= waveOffset + sizeof(WAVEFORMATEXTENSIBLE))
++            {
++                const auto extensible = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(wave);
++                event.ValidBitsPerSample = extensible->Samples.wValidBitsPerSample;
++                event.ChannelMask = extensible->dwChannelMask;
++                event.WaveSubFormat = extensible->SubFormat;
++            }
++        }
++    }
++
++    AppendFormatEvent(&event);
++}
++
++VOID MatCaptureRecordPacketEvent(
++    _In_ const VOID* Stream,
++    _In_ const WAVEFORMATEXTENSIBLE* Format,
++    _In_ ULONG PacketNumber,
++    _In_ ULONG LastPacketNumber,
++    _In_ KSSTATE State,
++    _In_ NTSTATUS Status,
++    _In_ ULONG DmaBufferSize,
++    _In_ ULONG NotificationCount,
++    _In_ ULONG NotificationIntervalMs)
++{
++    if (Format == nullptr || !IsCapturedFormat(Format))
++    {
++        return;
++    }
++
++    MAT_CAPTURE_FORMAT_EVENT event = {};
++    event.InterruptTime100ns = KeQueryInterruptTime();
++    event.ProcessId = PtrToUlong(Stream);
++    event.ThreadId = PtrToUlong(KeGetCurrentThread());
++    event.Type = MatCaptureFormatEventWritePacket;
++    event.Pin = PacketNumber;
++    event.Status = Status;
++    event.Capture = static_cast<ULONG>(State);
++    event.FormatSize = DmaBufferSize;
++    event.FormatTag = static_cast<USHORT>(LastPacketNumber & 0xFFFF);
++    event.Channels = static_cast<USHORT>((LastPacketNumber >> 16) & 0xFFFF);
++    event.SampleRate = NotificationIntervalMs;
++    event.AverageBytesPerSecond = NotificationCount == 0
++        ? 0
++        : DmaBufferSize / NotificationCount;
++    event.ChannelMask = NotificationCount;
++    event.WaveSubFormat = Format->SubFormat;
++    AppendFormatEvent(&event);
++}
+diff --git a/audio/sysvad/matcapture.h b/audio/sysvad/matcapture.h
+new file mode 100644
+index 0000000..aaaf6c8
+--- /dev/null
++++ b/audio/sysvad/matcapture.h
+@@ -0,0 +1,138 @@
++#pragma once
++
++#include <devioctl.h>
++
++#define MAT_CAPTURE_PROTOCOL_VERSION 3U
++#define MAT_CAPTURE_PROTOCOL_VERSION_IEC61937 2U
++#define MAT_CAPTURE_DEVICE_PATH L"\\\\.\\DolbyDecoderMat"
++
++#define IOCTL_MAT_CAPTURE_READ \
++    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_READ_ACCESS)
++#define IOCTL_MAT_CAPTURE_GET_STATS \
++    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_READ_ACCESS)
++#define IOCTL_MAT_CAPTURE_RESET \
++    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_WRITE_ACCESS)
++#define IOCTL_MAT_CAPTURE_GET_FORMAT_LOG \
++    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x803, METHOD_BUFFERED, FILE_READ_ACCESS)
++#define IOCTL_MAT_CAPTURE_RESET_FORMAT_LOG \
++    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x804, METHOD_BUFFERED, FILE_WRITE_ACCESS)
++
++#define MAT_CAPTURE_FORMAT_LOG_VERSION 1U
++
++typedef enum _MAT_CAPTURE_FORMAT_EVENT_TYPE
++{
++    MatCaptureFormatEventIsFormatSupported = 1,
++    MatCaptureFormatEventNewStream = 2,
++    MatCaptureFormatEventWritePacket = 3
++} MAT_CAPTURE_FORMAT_EVENT_TYPE;
++
++typedef struct _MAT_CAPTURE_FORMAT_EVENT
++{
++    ULONGLONG Sequence;
++    ULONGLONG InterruptTime100ns;
++    ULONG ProcessId;
++    ULONG ThreadId;
++    ULONG Type;
++    ULONG Pin;
++    LONG Status;
++    ULONG Capture;
++    GUID MajorFormat;
++    GUID DataSubFormat;
++    GUID Specifier;
++    ULONG FormatSize;
++    USHORT FormatTag;
++    USHORT Channels;
++    ULONG SampleRate;
++    ULONG AverageBytesPerSecond;
++    USHORT BlockAlign;
++    USHORT BitsPerSample;
++    USHORT ExtraSize;
++    USHORT ValidBitsPerSample;
++    ULONG ChannelMask;
++    GUID WaveSubFormat;
++} MAT_CAPTURE_FORMAT_EVENT, *PMAT_CAPTURE_FORMAT_EVENT;
++
++typedef struct _MAT_CAPTURE_FORMAT_LOG
++{
++    ULONG Version;
++    ULONG HeaderBytes;
++    ULONG RecordBytes;
++    ULONG RecordCount;
++    ULONGLONG FirstSequence;
++    ULONGLONG TotalRecords;
++    ULONGLONG DroppedRecords;
++} MAT_CAPTURE_FORMAT_LOG, *PMAT_CAPTURE_FORMAT_LOG;
++
++typedef struct _MAT_CAPTURE_READ_HEADER
++{
++    ULONG Version;
++    ULONG HeaderBytes;
++    ULONG PayloadBytes;
++    ULONG Reserved;
++    ULONGLONG FirstByteSequence;
++    ULONGLONG TotalBytesWritten;
++    ULONGLONG DroppedBytes;
++    GUID SubFormat;
++    ULONGLONG FormatChanges;
++    ULONG SampleRate;
++    ULONG ChannelMask;
++    USHORT Channels;
++    USHORT BitsPerSample;
++    USHORT ValidBitsPerSample;
++    USHORT BlockAlign;
++} MAT_CAPTURE_READ_HEADER, *PMAT_CAPTURE_READ_HEADER;
++
++typedef struct _MAT_CAPTURE_STATS
++{
++    ULONG Version;
++    ULONG CapacityBytes;
++    ULONG AvailableBytes;
++    ULONG Reserved;
++    ULONGLONG TotalBytesWritten;
++    ULONGLONG TotalBytesRead;
++    ULONGLONG DroppedBytes;
++    GUID SubFormat;
++    ULONGLONG FormatChanges;
++    ULONG SampleRate;
++    ULONG ChannelMask;
++    USHORT Channels;
++    USHORT BitsPerSample;
++    USHORT ValidBitsPerSample;
++    USHORT BlockAlign;
++} MAT_CAPTURE_STATS, *PMAT_CAPTURE_STATS;
++
++#if defined(_KERNEL_MODE)
++
++_IRQL_requires_max_(PASSIVE_LEVEL)
++NTSTATUS MatCaptureInitialize(_In_ PDRIVER_OBJECT DriverObject);
++
++_IRQL_requires_max_(PASSIVE_LEVEL)
++VOID MatCaptureShutdown(_In_ PDRIVER_OBJECT DriverObject);
++
++_IRQL_requires_max_(DISPATCH_LEVEL)
++VOID MatCaptureWrite(
++    _In_ const WAVEFORMATEXTENSIBLE* Format,
++    _In_reads_bytes_(ByteCount) const BYTE* Data,
++    _In_ ULONG ByteCount);
++
++_IRQL_requires_max_(DISPATCH_LEVEL)
++VOID MatCaptureRecordFormatEvent(
++    _In_ MAT_CAPTURE_FORMAT_EVENT_TYPE Type,
++    _In_ ULONG Pin,
++    _In_ BOOLEAN Capture,
++    _In_ NTSTATUS Status,
++    _In_opt_ const KSDATAFORMAT* Format);
++
++_IRQL_requires_max_(DISPATCH_LEVEL)
++VOID MatCaptureRecordPacketEvent(
++    _In_ const VOID* Stream,
++    _In_ const WAVEFORMATEXTENSIBLE* Format,
++    _In_ ULONG PacketNumber,
++    _In_ ULONG LastPacketNumber,
++    _In_ KSSTATE State,
++    _In_ NTSTATUS Status,
++    _In_ ULONG DmaBufferSize,
++    _In_ ULONG NotificationCount,
++    _In_ ULONG NotificationIntervalMs);
++
++#endif

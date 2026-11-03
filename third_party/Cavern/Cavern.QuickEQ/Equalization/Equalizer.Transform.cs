@@ -1,0 +1,320 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+
+using Cavern.QuickEQ.EQCurves;
+using Cavern.QuickEQ.Utilities;
+using Cavern.Utilities;
+
+namespace Cavern.QuickEQ.Equalization {
+    partial class Equalizer {
+        /// <summary>
+        /// Decrease the number of bands to this number at max. The function guarantees that a constant range
+        /// between old bands is kept.
+        /// </summary>
+        public void Downsample(int numberOfBands) {
+            int range = bands.Count / numberOfBands;
+            if (range == 0) {
+                return;
+            }
+
+            List<Band> newBands = new List<Band>();
+            for (int i = 0, c = bands.Count; i < c; i++) {
+                if (i % range == 0) {
+                    newBands.Add(bands[i]);
+                }
+            }
+            ResetBands(newBands);
+        }
+
+        /// <summary>
+        /// Change the number of bands to a fixed value by resampling the curve on a logarithmic scale.
+        /// </summary>
+        public void DownsampleLogarithmically(int numberOfBands, double startFreq, double endFreq) {
+            double mul = Math.Pow(10, (Math.Log10(endFreq) - Math.Log10(startFreq)) / (numberOfBands - 1));
+            List<Band> newBands = new List<Band>();
+            for (int i = 0; i < numberOfBands; i++) {
+                newBands.Add(new Band(startFreq, this[startFreq]));
+                startFreq *= mul;
+            }
+            ResetBands(newBands);
+        }
+
+        /// <summary>
+        /// Limit the application range of the EQ.
+        /// </summary>
+        /// <param name="startFreq">Bottom cutoff frequency</param>
+        /// <param name="endFreq">Top cutoff frequency</param>
+        public void Limit(double startFreq, double endFreq) => Limit(startFreq, endFreq, null, false);
+
+        /// <summary>
+        /// Limit the application range of the EQ, and conform the gain of the cut parts to the target curve.
+        /// </summary>
+        /// <param name="startFreq">Bottom cutoff frequency</param>
+        /// <param name="endFreq">Top cutoff frequency</param>
+        /// <param name="targetCurve">If set, the cuts will conform to this curve</param>
+        public void Limit(double startFreq, double endFreq, EQCurve targetCurve) =>
+            Limit(startFreq, endFreq, targetCurve, true);
+
+        /// <summary>
+        /// Limit the application range of the EQ, and optionally conform the gain of the cut parts to the target curve.
+        /// </summary>
+        /// <param name="startFreq">Bottom cutoff frequency</param>
+        /// <param name="endFreq">Top cutoff frequency</param>
+        /// <param name="targetCurve">If set, the cuts will conform to this curve</param>
+        /// <param name="conformGain">Add side bands so the tonal balance will stay the same outside the EQ's effective range</param>
+        public void Limit(double startFreq, double endFreq, EQCurve targetCurve, bool conformGain) {
+            int i = GetFirstBand(startFreq),
+                c = bands.Count;
+
+            double newStartGain = double.NaN;
+            if (i > 0) {
+                if (conformGain) {
+                    newStartGain = GetConformGain(0, i, targetCurve);
+                }
+                bands.RemoveRange(0, i);
+                c -= i;
+            }
+
+            double newEndGain = double.NaN;
+            for (i = c - 1; i >= 0; i--) {
+                if (bands[i].Frequency < endFreq) {
+                    if (i + 1 != c) {
+                        if (conformGain && c - i > 2) {
+                            newEndGain = GetConformGain(i + 1, c - 1, targetCurve);
+                        }
+                        bands.RemoveRange(i + 1, c - (i + 1));
+                    }
+                    break;
+                }
+            }
+
+            RecalculatePeakGain();
+            if (!double.IsNaN(newStartGain)) {
+                AddBand(new Band(startFreq, newStartGain));
+            }
+            if (!double.IsNaN(newEndGain)) {
+                AddBand(new Band(endFreq, newEndGain));
+            }
+        }
+
+        /// <summary>
+        /// Make sure that in the given range, all subsequent gains are smaller.
+        /// </summary>
+        public void MonotonousDecrease(double startFreq, double endFreq) {
+            (int first, int last) = GetBandLimits(startFreq, endFreq);
+            while (first < last) {
+                if (bands[last - 1].Gain < bands[last].Gain) {
+                    bands[last - 1] = new Band(bands[last - 1].Frequency, bands[last].Gain);
+                }
+                last--;
+            }
+        }
+
+        /// <summary>
+        /// Make sure that in the given range, all subsequent gains are larger.
+        /// </summary>
+        public void MonotonousIncrease(double startFreq, double endFreq) {
+            for (int i = Math.Max(GetFirstBand(startFreq), 1), c = bands.Count; i < c; i++) {
+                if (bands[i].Gain > endFreq) {
+                    break;
+                }
+
+                if (bands[i - 1].Gain > bands[i].Gain) {
+                    bands[i - 1] = new Band(bands[i - 1].Frequency, bands[i].Gain);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Set the average gain of the curve to 0 dB.
+        /// </summary>
+        public void Normalize() => Normalize(double.MinValue, double.MaxValue);
+
+        /// <summary>
+        /// Set the average gain of the curve to 0 dB between frequency limits.
+        /// </summary>
+        public void Normalize(double startFreq, double endFreq) {
+            int first = GetFirstBandSafe(startFreq),
+                last = bands.Count;
+            double total = 0;
+            for (int i = first; i < last; i++) {
+                if (bands[i].Frequency > endFreq) {
+                    last = i;
+                    break;
+                }
+
+                total += bands[i].Gain;
+            }
+            Offset(total / (first - last));
+        }
+
+        /// <summary>
+        /// Set the RMS gain of the curve to 0 dB.
+        /// </summary>
+        public void NormalizeRMS() => NormalizeRMS(double.MinValue, double.MaxValue);
+
+        /// <summary>
+        /// Set the RMS gain of the curve to 0 dB between frequency limits.
+        /// </summary>
+        public void NormalizeRMS(double startFreq, double endFreq) => Offset(-GetAverageLevel(startFreq, endFreq));
+
+        /// <summary>
+        /// Remove points that don't result in any change.
+        /// </summary>
+        public void Optimize() {
+            int c = bands.Count;
+            List<Band> newBands = new List<Band>(c) {
+                bands[0]
+            };
+            c--;
+            for (int i = 1; i < c; i++) {
+                if (bands[i].Gain != bands[i - 1].Gain && bands[i].Gain != bands[i + 1].Gain) {
+                    newBands.Add(bands[i]);
+                }
+            }
+            newBands.Add(bands[^1]);
+            ResetBands(newBands);
+        }
+
+        /// <summary>
+        /// Clear all points that are not local maxima or minima.
+        /// </summary>
+        public void RemoveMidpoints() {
+            int c = bands.Count;
+            List<Band> newBands = new List<Band>(c) {
+                bands[0]
+            };
+            c--;
+            for (int i = 1; i < c; i++) {
+                if ((bands[i].Gain >= bands[i - 1].Gain && bands[i].Gain >= bands[i + 1].Gain) ||
+                    (bands[i].Gain <= bands[i - 1].Gain && bands[i].Gain <= bands[i + 1].Gain)) {
+                    newBands.Add(bands[i]);
+                }
+            }
+            newBands.Add(bands[^1]);
+            ResetBands(newBands);
+        }
+
+        /// <summary>
+        /// Change the frequencies contained in this <see cref="Equalizer"/>.
+        /// </summary>
+        /// <param name="frequencies">Use the frequencies of these bands</param>
+        public void Resample(IReadOnlyList<Band> frequencies) {
+            int c = frequencies.Count;
+            List<Band> newBands = new List<Band>(c);
+            for (int i = 0; i < c; i++) {
+                newBands.Add(new Band(frequencies[i].Frequency, this[frequencies[i].Frequency]));
+            }
+            ResetBands(newBands);
+        }
+
+        /// <summary>
+        /// Multiply all gain values. Multiplication happens to the decibel values without transforming them back to gain.
+        /// </summary>
+        public void Scale(double by) {
+            for (int i = 0, c = bands.Count; i < c; i++) {
+                bands[i] = new Band(bands[i].Frequency, bands[i].Gain * by);
+            }
+        }
+
+        /// <summary>
+        /// Apply smoothing on this <see cref="Equalizer"/> with a window of a given octave.
+        /// </summary>
+        public void Smooth(double octaves) {
+            int smoothFrom = 0, smoothTo = 0;
+            double multipleTo = Math.Pow(2, octaves), multipleFrom = 1 / multipleTo;
+            double[] result = new double[bands.Count];
+            for (int i = 0; i < result.Length; i++) {
+                double minFreq = bands[i].Frequency * multipleFrom,
+                    maxFreq = bands[i].Frequency * multipleTo;
+                while (smoothFrom < result.Length && bands[smoothFrom].Frequency < minFreq) {
+                    ++smoothFrom;
+                }
+                while (smoothTo < result.Length && bands[smoothTo].Frequency < maxFreq) {
+                    ++smoothTo;
+                }
+
+                if (smoothFrom != smoothTo) {
+                    double smoothed = Math.Pow(10, bands[i].Gain * .05);
+                    for (int j = smoothFrom + 1; j < smoothTo; j++) {
+                        smoothed += Math.Pow(10, bands[j].Gain * .05);
+                    }
+                    smoothed = 20 * Math.Log10(smoothed / (smoothTo - smoothFrom));
+                    result[i] = smoothed;
+                } else {
+                    result[i] = bands[i].Gain;
+                }
+            }
+            for (int i = 0; i < result.Length; i++) {
+                bands[i] = new Band(bands[i].Frequency, result[i]);
+            }
+        }
+
+        /// <summary>
+        /// Apply a smoothing on this <see cref="Equalizer"/> that changes by frequency between two limits.
+        /// </summary>
+        public void Smooth(double startOctave, double endOctave) {
+            Equalizer end = (Equalizer)Clone();
+            Smooth(startOctave);
+            end.Smooth(endOctave);
+            List<Band> endBands = end.bands;
+            int count = bands.Count;
+            float positioner = 1f / count;
+            for (int i = 0; i < count; i++) {
+                bands[i] = new Band(bands[i].Frequency, QMath.Lerp(bands[i].Gain, endBands[i].Gain, i * positioner));
+            }
+        }
+
+        /// <summary>
+        /// Get the regression line of this <see cref="Equalizer"/>.
+        /// </summary>
+        /// <param name="startFreq">Lower frequency limit of the region to average for regression</param>
+        /// <param name="endFreq">Upper frequency limit of the region to average for regression</param>
+        /// <param name="bands">Number of points for the result to have</param>
+        public Equalizer ToRegressionLine(double startFreq, double endFreq, int bands) {
+            (double slope, double intercept) = GetRegressionLine(startFreq, endFreq);
+            Band[] result = new Band[bands];
+            GraphUtils.ForEachLog(result, 10, 20000, (double freq, ref Band band) =>
+                band = new Band(freq, slope * Math.Log10(freq) + intercept));
+            return new Equalizer(new List<Band>(result), true);
+        }
+
+        /// <summary>
+        /// Add windowing on the right of the curve. Windowing is applied logarithmically.
+        /// </summary>
+        public void Window(Window right, double startFreq, double endFreq) {
+            if (startFreq >= bands[^1].Frequency) { // If there are no bands for windowing, make them
+                const int intermediateBands = 128; // 128 bands are always enough to follow a window's curvature
+                double gap = (endFreq - startFreq) / intermediateBands;
+                double lastGain = bands[^1].Gain;
+                for (int i = 0; i < intermediateBands;) {
+                    bands.Add(new Band(startFreq + ++i * gap, lastGain));
+                }
+            }
+            Windowing.ApplyWindow(bands, right, startFreq, endFreq);
+        }
+
+        /// <summary>
+        /// Get the average gain between two band indexes if the curve was perfectly corrected to a specific <paramref name="targetCurve"/>.
+        /// </summary>
+        double GetConformGain(int firstBand, int lastBand, EQCurve targetCurve) {
+            double clearStartFreq = bands[firstBand].Frequency,
+                clearEndFreq = bands[lastBand].Frequency;
+            double result = GetAverageLevel(firstBand, lastBand);
+            if (targetCurve != null) {
+                return result + targetCurve.GetAverageLevel(clearStartFreq, clearEndFreq, (clearEndFreq - clearStartFreq) / 50);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Overwrite the current bands with new ones while performing necessary post processing.
+        /// </summary>
+        void ResetBands(List<Band> newBands) {
+            bands.Clear();
+            bands.AddRange(newBands);
+            RecalculatePeakGain();
+        }
+    }
+}

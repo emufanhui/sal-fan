@@ -1,0 +1,288 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Text;
+using SpatialAudioLab.Core.Runtime;
+
+namespace SpeakerLayoutEditor.Services;
+
+/// <summary>
+/// 低音管理开关与分频点的持久化状态。跟布局无关地存着，真正喂给引擎的
+/// 配置文件是按当前布局的声道数现生成的 —— 声道数是硬约束，对不上引擎就旁路。
+/// </summary>
+internal sealed record CrossoverSettings(bool Enabled, double FrequencyHz);
+
+/// <summary>
+/// Owns everything about the optional crossover: the on/off + frequency state,
+/// the cdsp config file it produces, and launching the editor on that file.
+/// </summary>
+internal sealed class CrossoverConfigService
+{
+    /// <summary>
+    /// THX reference crossover. Small speakers genuinely benefit from going
+    /// higher; 80 Hz is the value every renderer defaults to, so it is the one
+    /// the generated config starts from.
+    /// </summary>
+    public const double DefaultFrequencyHz = 80.0;
+    public const double MinimumFrequencyHz = 40.0;
+    public const double MaximumFrequencyHz = 200.0;
+
+    private const int ChunkSize = 256;
+    private const int SampleRate = 48000;
+    private const int FilterOrder = 4;
+
+    /// <summary>
+    /// Each low-pass is summed into the LFE at -12 dB. Nine or eleven of them
+    /// arriving at once would otherwise clip the sub output, and a quarter is
+    /// the usual compromise.
+    /// </summary>
+    private const double LowPassSumGainDb = -12.0;
+
+    private readonly RuntimePaths paths;
+
+    public CrossoverConfigService(RuntimePaths paths)
+    {
+        this.paths = paths;
+    }
+
+    private string SettingsPath => Path.Combine(paths.DataRoot, "crossover.ini");
+
+    private string ConfigDirectory => Path.Combine(paths.DataRoot, "crossover");
+
+    private string EditorExecutable =>
+        Path.Combine(
+            Path.GetDirectoryName(paths.EngineExecutable) ?? paths.ApplicationRoot,
+            "cdsp_editor.exe");
+
+    public CrossoverSettings Load()
+    {
+        return ReadSettings(SettingsPath);
+    }
+
+    public void Save(CrossoverSettings settings)
+    {
+        Directory.CreateDirectory(paths.DataRoot);
+
+        // Written straight out rather than round-tripped through the profile
+        // serializer: this is one small machine-local file, not part of a layout
+        // that gets exported and shared.
+        StringBuilder text = new();
+        text.AppendLine("[crossover]");
+        text.AppendLine($"enabled={(settings.Enabled ? "1" : "0")}");
+        text.AppendLine(
+            $"hz={settings.FrequencyHz.ToString("0.#", CultureInfo.InvariantCulture)}");
+        File.WriteAllText(SettingsPath, text.ToString(), Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// Produces the config for this layout, creating it when it is not there yet.
+    /// Returns its full path, which is what the engine is pointed at.
+    /// </summary>
+    /// <param name="channels">
+    /// Layout channel count. cdsp refuses a config whose channel count does not
+    /// match the stream, so this is regenerated per layout rather than shared.
+    /// </param>
+    /// <param name="lfeIndex">Channel that collects the low end; never high-passed.</param>
+    /// <param name="frequencyHz">Crossover frequency.</param>
+    /// <param name="force">
+    /// Rewrite even when a file already exists, which is what changing the
+    /// frequency has to do.
+    /// </param>
+    public string EnsureConfig(
+        int channels,
+        int lfeIndex,
+        double frequencyHz,
+        bool force = false)
+    {
+        if (channels <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(channels));
+        }
+
+        Directory.CreateDirectory(ConfigDirectory);
+        string path = ConfigPath(channels, lfeIndex);
+        if (force || !File.Exists(path))
+        {
+            File.WriteAllText(
+                path,
+                BuildConfig(channels, lfeIndex, frequencyHz),
+                new UTF8Encoding(false));
+        }
+
+        return path;
+    }
+
+    /// <summary>
+    /// Keyed by channel count *and* which channel is the sub, because the config
+    /// hard-codes the LFE index in its matrix. Two layouts with the same channel
+    /// count but the sub in a different slot would otherwise share one file and
+    /// quietly route every low-pass into the wrong speaker.
+    /// </summary>
+    public string ConfigPath(int channels, int lfeIndex)
+    {
+        return Path.Combine(ConfigDirectory, $"dsp-{channels}ch-lfe{lfeIndex}.json");
+    }
+
+    /// <summary>
+    /// Opens the config in the cdsp editor. False when the editor is not
+    /// installed next to the engine, which is a normal situation rather than an
+    /// error: the config is plain JSON and can be edited by hand.
+    /// </summary>
+    public bool TryOpenEditor(string configPath)
+    {
+        string editor = EditorExecutable;
+        if (!File.Exists(editor) || !File.Exists(configPath))
+        {
+            return false;
+        }
+
+        ProcessStartInfo start = new(editor)
+        {
+            UseShellExecute = true
+        };
+        start.ArgumentList.Add(configPath);
+        Process.Start(start);
+        return true;
+    }
+
+    private static CrossoverSettings ReadSettings(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return new CrossoverSettings(false, DefaultFrequencyHz);
+        }
+
+        bool enabled = false;
+        double hz = DefaultFrequencyHz;
+        bool inSection = false;
+        foreach (string rawLine in File.ReadAllLines(path))
+        {
+            string line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith(';') || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (line.StartsWith('['))
+            {
+                inSection = line.Equals("[crossover]", StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+
+            if (!inSection)
+            {
+                continue;
+            }
+
+            int split = line.IndexOf('=');
+            if (split <= 0)
+            {
+                continue;
+            }
+
+            string key = line[..split].Trim();
+            string value = line[(split + 1)..].Trim();
+            if (key.Equals("enabled", StringComparison.OrdinalIgnoreCase))
+            {
+                enabled = value is "1" or "true";
+            }
+            else if (key.Equals("hz", StringComparison.OrdinalIgnoreCase) &&
+                     double.TryParse(
+                         value,
+                         NumberStyles.Float,
+                         CultureInfo.InvariantCulture,
+                         out double parsed))
+            {
+                hz = Math.Clamp(parsed, MinimumFrequencyHz, MaximumFrequencyHz);
+            }
+        }
+
+        return new CrossoverSettings(enabled, hz);
+    }
+
+    /// <summary>
+    /// Builds the cdsp document: every speaker keeps its high-pass and sends its
+    /// low-pass to the LFE.
+    /// </summary>
+    private static string BuildConfig(int channels, int lfeIndex, double frequencyHz)
+    {
+        string hz = frequencyHz.ToString("0.#", CultureInfo.InvariantCulture);
+        string sum = LowPassSumGainDb.ToString("0.#", CultureInfo.InvariantCulture);
+
+        StringBuilder json = new();
+        json.AppendLine("{");
+        json.AppendLine($"  \"samplerate\": {SampleRate},");
+        json.AppendLine($"  \"chunksize\": {ChunkSize},");
+        json.AppendLine($"  \"input_channels\": {channels},");
+        json.AppendLine($"  \"output_channels\": {channels},");
+
+        // Paths: two per speaker (high-pass, low-pass), then the LFE passthrough.
+        // cdsp addresses them by index, so the order has to be tracked here.
+        json.AppendLine("  \"paths\": [");
+        List<string> pathEntries = new();
+        List<int> lowPassPaths = new();
+        Dictionary<int, int> highPassPathByChannel = new();
+        int nextPath = 0;
+        for (int channel = 0; channel < channels; channel++)
+        {
+            if (channel == lfeIndex)
+            {
+                continue;
+            }
+
+            int highPass = nextPath++;
+            int lowPass = nextPath++;
+            highPassPathByChannel[channel] = highPass;
+            lowPassPaths.Add(lowPass);
+            pathEntries.Add(
+                $"    {{ \"input\": {channel}, \"filters\": " +
+                $"[ {{ \"type\": \"lr_highpass\", \"freq\": {hz}, \"order\": {FilterOrder} }} ] }}");
+            pathEntries.Add(
+                $"    {{ \"input\": {channel}, \"filters\": " +
+                $"[ {{ \"type\": \"lr_lowpass\", \"freq\": {hz}, \"order\": {FilterOrder} }} ] }}");
+        }
+
+        int lfePath = nextPath;
+        pathEntries.Add(
+            $"    {{ \"input\": {lfeIndex}, \"gain_db\": 0.0, \"filters\": [] }}");
+
+        // Entries carry no trailing comma of their own and are joined with one,
+        // so the last element never ends up with a dangling comma.
+        json.AppendLine(string.Join("," + Environment.NewLine, pathEntries));
+        json.AppendLine("  ],");
+
+        json.AppendLine("  \"matrix\": [");
+        List<string> matrixEntries = new();
+        for (int channel = 0; channel < channels; channel++)
+        {
+            if (channel == lfeIndex)
+            {
+                StringBuilder sources = new();
+                sources.AppendLine($"    {{ \"out\": {channel}, \"sources\": [");
+                List<string> entries = new()
+                {
+                    $"        {{ \"path\": {lfePath}, \"gain_db\": 0.0 }}"
+                };
+                foreach (int lowPass in lowPassPaths)
+                {
+                    entries.Add($"        {{ \"path\": {lowPass}, \"gain_db\": {sum} }}");
+                }
+
+                sources.AppendLine(string.Join("," + Environment.NewLine, entries));
+                sources.Append("      ] }");
+                matrixEntries.Add(sources.ToString());
+            }
+            else
+            {
+                matrixEntries.Add(
+                    $"    {{ \"out\": {channel}, \"sources\": " +
+                    $"[ {{ \"path\": {highPassPathByChannel[channel]}, \"gain_db\": 0 }} ] }}");
+            }
+        }
+
+        json.AppendLine(string.Join("," + Environment.NewLine, matrixEntries));
+        json.AppendLine("  ]");
+        json.AppendLine("}");
+        return json.ToString();
+    }
+}

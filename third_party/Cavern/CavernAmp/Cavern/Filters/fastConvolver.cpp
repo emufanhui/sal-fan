@@ -1,0 +1,148 @@
+#include <algorithm>
+#include <cstring>
+
+#include "../Utilities/complexArray.h"
+#include "fastConvolver.h"
+#include "../Utilities/measurements.h"
+#include "../Utilities/qmath.h"
+
+using namespace std;
+
+FastConvolver::FastConvolver(const float *impulse, const int len) {
+    Initialize(impulse, len, 0);
+}
+
+FastConvolver::FastConvolver(const float *impulse, const int len, const int delay) {
+    Initialize(impulse, len, delay);
+}
+
+FastConvolver::FastConvolver(const FastConvolver &other) {
+    filterLength = other.filterLength;
+    cache = new FFTCache(filterLength);
+    filter = new Complex[filterLength];
+    memcpy(filter, other.filter, filterLength * sizeof(Complex));
+    present = new Complex[filterLength];
+    future = new float[filterLength + other.delay]();
+    this->delay = other.delay;
+}
+
+void FastConvolver::Initialize(const float *impulse, const int len, const int delay) {
+    filterLength = 2 << Log2Ceil(len); // Zero padding for the falloff to have space
+    cache = new FFTCache(filterLength);
+    filter = new Complex[filterLength];
+    for (int sample = 0; sample < len; sample++) {
+        filter[sample].real = impulse[sample];
+    }
+    ProcessFFT(filter, filterLength, cache, log2(filterLength) - 1);
+    present = new Complex[filterLength];
+    future = new float[filterLength + delay]();
+    this->delay = delay;
+}
+
+int FastConvolver::GetLength() const {
+    return filterLength;
+}
+
+void FastConvolver::GetFilter(float *output) const {
+    Complex* ifft = new Complex[filterLength];
+    memcpy(ifft, filter, filterLength * sizeof(Complex));
+    InPlaceIFFT(ifft, filterLength, cache);
+    int outLength = filterLength >> 1;
+    for (int i = 0; i < outLength; i++) {
+        output[i] = ifft[i].real;
+    }
+    delete[] ifft;
+}
+
+void FastConvolver::Process(float *samples, int len) {
+    int start = 0;
+    while (start < len) {
+        int nextBlock = start + (filterLength >> 1);
+        ProcessTimeslot(samples, 0, 1, start, min(len, nextBlock));
+        start = nextBlock;
+    }
+}
+
+void FastConvolver::Process(float *samples, int len, int channel, int channels) {
+    int start = 0,
+        end = len / channels;
+    while (start < end) {
+        int nextBlock = start + (filterLength >> 1);
+        ProcessTimeslot(samples, channel, channels, start, min(end, nextBlock));
+        start = nextBlock;
+    }
+}
+
+void FastConvolver::ProcessTimeslot(float *samples, int channel, int channels, int from, int to) {
+    int sourceLength = to - from;
+    float *sample = samples + from * channels + channel,
+        *lastSample = sample + sourceLength * channels;
+    Complex* timeslot = present;
+    while (sample != lastSample) {
+        timeslot->real = *sample;
+        timeslot->imaginary = 0;
+        timeslot++;
+        sample += channels;
+    }
+    for (int i = sourceLength; i < filterLength; i++) {
+        present[i].real = 0;
+        present[i].imaginary = 0;
+    }
+
+    ProcessCache(sourceLength + (filterLength >> 1));
+
+    float *source = future;
+    sample = samples + from * channels + channel;
+    lastSample = sample + sourceLength * channels;
+    while (sample != lastSample) {
+        *sample = *source++;
+        sample += channels;
+    }
+    to -= from;
+
+    int futureLength = filterLength + delay;
+    for (int i = 0; i < futureLength - to; i++) {
+        future[i] = future[i + to];
+    }
+    for (int i = futureLength - to; i < futureLength; i++) {
+        future[i] = 0;
+    }
+}
+
+void FastConvolver::ProcessCache(const int maxResultLength) {
+    // Perform the convolution
+    ProcessFFT(present, filterLength, cache, log2(filterLength) - 1);
+    Convolve(present, filter, filterLength);
+    InPlaceIFFT(present, filterLength, cache);
+
+    // Append the result to the future
+    Complex *source = present;
+    float *destination = future + delay,
+        *end = destination + maxResultLength;
+    while (destination != end) {
+        *destination++ += (*source++).real;
+    }
+}
+
+Filter* FastConvolver::Clone() const {
+    return new FastConvolver(*this);
+}
+
+FastConvolver::~FastConvolver() {
+    delete[] filter;
+    delete[] present;
+    delete[] future;
+    delete cache;
+}
+
+FastConvolver* DLL_EXPORT FastConvolver_Create(const float *impulse, const int len, const int delay) {
+    return new FastConvolver(impulse, len, delay);
+}
+
+int DLL_EXPORT FastConvolver_GetLength(FastConvolver *instance) {
+    return instance->GetLength();
+}
+
+void DLL_EXPORT FastConvolver_GetFilter(FastConvolver *instance, float *output) {
+    instance->GetFilter(output);
+}

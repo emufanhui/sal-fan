@@ -1,0 +1,54 @@
+{
+  "samplerate": 48000,
+  "chunksize": 256,
+  "input_channels": 10,
+  "output_channels": 10,
+  "_comment": "Bass management for the current 10-speaker layout: FL FR FC LFE BL BR SL SR TFL TFR. Index 3 is LFE, so it is never high-passed. Each of the other nine speakers keeps its 80 Hz Linkwitz-Riley high-pass and sends its low-pass to the LFE at -12 dB, which is the usual 1/4 sum so nine summed low ends do not clip the sub out.",
+  "paths": [
+    { "input": 0, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 0, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 1, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 1, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 2, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 2, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 4, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 4, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 5, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 5, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 6, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 6, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 7, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 7, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 8, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 8, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 9, "filters": [ { "type": "lr_highpass", "freq": 80.0, "order": 4 } ] },
+    { "input": 9, "filters": [ { "type": "lr_lowpass",  "freq": 80.0, "order": 4 } ] },
+    { "input": 3, "gain_db": 0.0, "filters": [] }
+  ],
+  "matrix": [
+    { "out": 0, "sources": [ { "path": 0,  "gain_db": 0 } ] },
+    { "out": 1, "sources": [ { "path": 2,  "gain_db": 0 } ] },
+    { "out": 2, "sources": [ { "path": 4,  "gain_db": 0 } ] },
+    {
+      "out": 3,
+      "sources": [
+        { "path": 18, "gain_db": 0.0 },
+        { "path": 1,  "gain_db": -12.0 },
+        { "path": 3,  "gain_db": -12.0 },
+        { "path": 5,  "gain_db": -12.0 },
+        { "path": 7,  "gain_db": -12.0 },
+        { "path": 9,  "gain_db": -12.0 },
+        { "path": 11, "gain_db": -12.0 },
+        { "path": 13, "gain_db": -12.0 },
+        { "path": 15, "gain_db": -12.0 },
+        { "path": 17, "gain_db": -12.0 }
+      ]
+    },
+    { "out": 4, "sources": [ { "path": 6,  "gain_db": 0 } ] },
+    { "out": 5, "sources": [ { "path": 8,  "gain_db": 0 } ] },
+    { "out": 6, "sources": [ { "path": 10, "gain_db": 0 } ] },
+    { "out": 7, "sources": [ { "path": 12, "gain_db": 0 } ] },
+    { "out": 8, "sources": [ { "path": 14, "gain_db": 0 } ] },
+    { "out": 9, "sources": [ { "path": 16, "gain_db": 0 } ] }
+  ]
+}

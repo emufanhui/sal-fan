@@ -1,0 +1,48 @@
+﻿**********************
+Windows PowerShell 脚本开始
+开始时间: 20261030140530
+用户名: HTPC\fanhu
+RunAs 用户: HTPC\fanhu
+配置名称: 
+计算机: HTPC (Microsoft Windows NT 10.0.26300.0)
+主机应用程序: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\sp\spatial-audio-lab\tools\Eac3Hook\diag.ps1
+进程 ID: 30824
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+=== admin=True user=HTPC\fanhu ===
+audiodg before:
+
+   Id StartTime          
+   -- ---------          
+31764 2026/10/30 14:01:17
+killed audiodg
+old instance gone, waiting for a new one (keep playing audio)
+audiodg respawned: pid=32700 at 10/30/2026 14:05:30
+probe loaded at 0x3A370000, log: C:\Windows\Temp\sal_eac3_probe.log
+injector exit=0
+probe log: 1175211 bytes, written 10/30/2026 14:06:10
+--- head ---
+sal-eac3-probe pid=32700
+NtWriteFile code=0x00000000 len=25 sync=0 tid=30020 73616C2D656163332D70726F6265207069643D33323730300A00000000000000
+WriteFile code=0x00000000 len=25 sync=0 tid=30020 73616C2D656163332D70726F6265207069643D33323730300A00000000000000
+NtWriteFile code=0x00000000 len=117 sync=0 tid=30020 4E74577269746546696C6520636F64653D30783030303030303030206C656E3D
+--- KsHeader ---
+--- KsWrite / Fault ---
+--- tail ---
+NtDeviceIoControlFile code=0x002F0003 len=24 sync=0 tid=24716 A0AAFF451B6ED011BCF244455354000032000000010000000000000000000000
+DeviceIoControl code=0x002F0003 len=24 sync=0 tid=24716 A0AAFF451B6ED011BCF244455354000032000000010000000000000000000000
+NtDeviceIoControlFile code=0x00222017 len=8 sync=0 tid=24716 6E1F02001E5C0100000000000000000000000000000000000000000000000000
+NtDeviceIoControlFile code=0x002F8013 len=0 sync=0 tid=32748 0000000000000000000000000000000000000000000000000000000000000000
+DeviceIoControl code=0x002F8013 len=0 sync=0 tid=32748 0000000000000000000000000000000000000000000000000000000000000000
+NtDe
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20261030140610
+**********************

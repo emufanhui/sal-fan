@@ -1,0 +1,111 @@
+﻿using System.Collections.Generic;
+using System.Linq;
+
+using Cavern.Channels;
+using Cavern.Filters;
+using Cavern.Filters.Interfaces;
+using Cavern.Filters.Utilities;
+using Cavern.Format.Common;
+using Cavern.QuickEQ.SignalGeneration;
+using Cavern.Utilities;
+using Cavern.Waveforms;
+
+using ConfigFile = Cavern.Format.ConfigurationFile.ConfigurationFile;
+
+namespace Cavern.Format.Utilities {
+    /// <summary>
+    /// Produces impulse responses for each output channel with different input channels being active.
+    /// </summary>
+    public class ConfigurationFileSimulator {
+        /// <summary>
+        /// The configuration file to simulate.
+        /// </summary>
+        readonly ConfigFile configurationFile;
+
+        /// <summary>
+        /// Produces impulse responses for each output channel with different input channels being active.
+        /// </summary>
+        public ConfigurationFileSimulator(ConfigFile configurationFile) => this.configurationFile = configurationFile;
+
+        /// <summary>
+        /// Produces impulse responses for each output channel with different input channels being active.
+        /// </summary>
+        /// <param name="channels">Channel indices that have input Dirac-delta signals</param>
+        /// <param name="samples">Number of samples in the resulting impulse response</param>
+        public MultichannelWaveform Simulate(int[] channels, int samples) => Simulate(channels, WaveformGenerator.DiracDelta(samples));
+
+        /// <summary>
+        /// Produces impulse responses for each output channel with different input channels being active.
+        /// </summary>
+        /// <param name="channels">Channel indices that have input Dirac-delta signals</param>
+        /// <param name="initialImpulse">Impulse response of the incoming signal, the transformation of which by the filter set will be simulated</param>
+        public MultichannelWaveform Simulate(int[] channels, float[] initialImpulse) {
+            (string name, IFilterGraphNode root)[] sources = configurationFile.InputChannels;
+            MultichannelWaveform result = new MultichannelWaveform(sources.Length, initialImpulse.Length);
+            for (int i = 0; i < sources.Length; i++) {
+                if (channels.Contains(i)) {
+                    float[] initialSignal = initialImpulse.FastClone();
+                    Simulate(sources[i].root, initialSignal, result);
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Produces impulse responses for each output channel with different input channels being active.
+        /// </summary>
+        /// <param name="channels">Channel indices that have input Dirac-delta signals</param>
+        /// <param name="samples">Number of samples in the resulting impulse response</param>
+        public MultichannelWaveform Simulate(ReferenceChannel[] channels, int samples) => Simulate(channels, WaveformGenerator.DiracDelta(samples));
+
+        /// <summary>
+        /// Produces impulse responses for each output channel with different input channels being active.
+        /// </summary>
+        /// <param name="channels">Channel indices that have input Dirac-delta signals</param>
+        /// <param name="initialImpulse">Impulse response of the incoming signal, the transformation of which by the filter set will be simulated</param>
+        public MultichannelWaveform Simulate(ReferenceChannel[] channels, float[] initialImpulse) {
+            (string name, IFilterGraphNode root)[] sources = configurationFile.InputChannels;
+            MultichannelWaveform result = new MultichannelWaveform(sources.Length, initialImpulse.Length);
+            for (int i = 0; i < sources.Length; i++) {
+                IFilterGraphNode root = sources[i].root;
+                ReferenceChannel channel = ((InputChannel)root.Filter).Channel;
+                if (channels.Contains(channel)) {
+                    float[] initialSignal = initialImpulse.FastClone();
+                    Simulate(root, initialSignal, result);
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Simulate impulse response for the given <paramref name="node"/> and pass the simulation down to children, until it reaches an output
+        /// where it gets added to the <paramref name="result"/>.
+        /// </summary>
+        void Simulate(IFilterGraphNode node, float[] signal, MultichannelWaveform result) {
+            if (node.Filter is OutputChannel output) {
+                int channel = configurationFile.InputChannels
+                    .IndexOf(x => x.name == output.ChannelName || ((InputChannel)x.root.Filter).Channel == output.Channel);
+                if (channel != -1) {
+                    WaveformUtils.Mix(signal, result[channel]);
+                } else {
+                    throw new InvalidChannelException(output.ChannelName);
+                }
+                return;
+            }
+
+            IReadOnlyList<IFilterGraphNode> children = node.Children;
+            node.Filter.Process(signal);
+            if (node.Filter is IResettableFilter resettable) {
+                resettable.Reset();
+            }
+
+            if (children.Count == 0) {
+                return;
+            }
+            Simulate(children[0], signal.FastClone(), result);
+            for (int i = 1, c = children.Count; i < c; i++) {
+                Simulate(children[i], signal.FastClone(), result);
+            }
+        }
+    }
+}

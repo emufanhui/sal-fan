@@ -1,0 +1,714 @@
+#include "audio_platform.h"
+#include "commands.h"
+#include "mat_capture_client.h"
+#include "multi_endpoint_renderer.h"
+#include "speaker_layout.h"
+
+#include <filesystem>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+
+#include "utf8.h"
+
+namespace dolby {
+
+std::string JsonString(const std::wstring& value) {
+    const std::string utf8 = Utf8(value);
+    std::ostringstream output;
+    output << '"';
+    for (const unsigned char character : utf8) {
+        switch (character) {
+        case '"': output << "\\\""; break;
+        case '\\': output << "\\\\"; break;
+        case '\b': output << "\\b"; break;
+        case '\f': output << "\\f"; break;
+        case '\n': output << "\\n"; break;
+        case '\r': output << "\\r"; break;
+        case '\t': output << "\\t"; break;
+        default:
+            if (character < 0x20) {
+                output << "\\u" << std::hex << std::uppercase << std::setw(4)
+                       << std::setfill('0') << static_cast<unsigned>(character)
+                       << std::dec << std::nouppercase;
+            } else {
+                output << static_cast<char>(character);
+            }
+        }
+    }
+    output << '"';
+    return output.str();
+}
+
+void PrintEndpointJson(const Endpoint& endpoint) {
+    std::cout << "{\"id\":" << JsonString(endpoint.id)
+              << ",\"name\":" << JsonString(endpoint.name)
+              << ",\"containerId\":";
+    if (endpoint.containerId.empty()) {
+        std::cout << "null";
+    } else {
+        std::cout << JsonString(endpoint.containerId);
+    }
+    std::cout << ",\"isDefault\":" << (endpoint.isDefault ? "true" : "false")
+              << ",\"maximumChannels48k\":" << endpoint.maximumChannels48k
+              << ",\"exclusivePcm48k\":[";
+    for (std::size_t index = 0; index < endpoint.exclusivePcm48k.size(); ++index) {
+        if (index != 0) std::cout << ',';
+        std::cout << endpoint.exclusivePcm48k[index];
+    }
+    std::cout << "]}\n";
+}
+
+void PrintUsage() {
+    std::wcout
+        << L"SpatialAudioLab.CLI list\n"
+        << L"SpatialAudioLab.CLI list-endpoints\n"
+        << L"SpatialAudioLab.CLI list-endpoints-json\n"
+        << L"SpatialAudioLab.CLI set-default [endpoint-filter]\n"
+        << L"SpatialAudioLab.CLI set-pcm714-format [endpoint-filter]\n"
+        << L"SpatialAudioLab.CLI set-codec-format <atmos|mat10|dtsx> [endpoint-filter]\n"
+        << L"SpatialAudioLab.CLI device-format [endpoint-filter]\n"
+        << L"SpatialAudioLab.CLI jack-info [endpoint-filter]\n"
+        << L"SpatialAudioLab.CLI render-test [seconds] [endpoint-filter] [pcm|mat20|mat21]\n"
+        << L"SpatialAudioLab.CLI replay-iec61937 input.wav [endpoint-filter] [repeat]\n"
+        << L"SpatialAudioLab.CLI spatial-test [seconds] [endpoint-filter] "
+           L"[bed|height|712|714|dynamic|dynamic-<position>|silence|impulse-<channel>]\n"
+        << L"SpatialAudioLab.CLI capture [seconds] [endpoint-filter] [output.wav]\n"
+        << L"SpatialAudioLab.CLI live-process-layout [seconds] [pid] [layout.ini] [gain] [prebuffer-ms]\n"
+        << L"SpatialAudioLab.CLI capture-process [seconds] [pid] [output.wav] [channels 8|12]\n"
+        << L"SpatialAudioLab.CLI list-audio-decoders [filter] [inspect]\n"
+        << L"SpatialAudioLab.CLI probe-winrt-decoder [runtime-class]\n"
+        << L"SpatialAudioLab.CLI probe-spatial-metadata [endpoint-filter]\n"
+        << L"SpatialAudioLab.CLI probe-dtsx-license [codec-name]\n"
+        << L"SpatialAudioLab.CLI probe-dtsx-field-of-use\n"
+        << L"SpatialAudioLab.CLI probe-dtsx-decode input.wav [max-bursts] [spatial|pcm] "
+           L"[output.wav]\n"
+        << L"SpatialAudioLab.CLI probe-media-types input-media\n"
+        << L"SpatialAudioLab.CLI capture-mat-ring [seconds] [output.wav] [poll-ms]\n"
+        << L"SpatialAudioLab.CLI capture-iec61937-ring [seconds] [output.wav] [poll-ms]\n"
+        << L"SpatialAudioLab.CLI ec3-record output.ec3 [poll-ms]\n"
+        << L"SpatialAudioLab.CLI ec3-pipe [pipe-name] [poll-ms]\n"
+        << L"SpatialAudioLab.CLI ec3-status\n"
+        << L"SpatialAudioLab.CLI mat-record output.mlp [poll-ms]\n"
+        << L"SpatialAudioLab.CLI mat-demux-raw <raw.bin> <output.mlp>\n"
+        << L"SpatialAudioLab.CLI driver-format-log [reset]\n"
+        << L"SpatialAudioLab.CLI analyze input.wav\n"
+        << L"SpatialAudioLab.CLI analyze-iec61937 input.wav\n"
+        << L"SpatialAudioLab.CLI extract-dtshd input.wav output.dts\n"
+        << L"SpatialAudioLab.CLI analyze-dtsx-exss input.dts\n"
+        << L"SpatialAudioLab.CLI analyze-mat input.wav\n"
+        << L"SpatialAudioLab.CLI analyze-mat-layout input.wav layout.ini\n"
+        << L"SpatialAudioLab.CLI compare-mat-positions origin.wav left.wav right.wav above.wav "
+           L"front.wav behind.wav\n"
+        << L"SpatialAudioLab.CLI analyze-mat-positions input.wav\n"
+        << L"SpatialAudioLab.CLI extract-mat-712 input.wav output.wav\n\n"
+        << L"SpatialAudioLab.CLI play-712 input.wav [rear-filter] [height-filter] [gain] [repeat]\n\n"
+        << L"SpatialAudioLab.CLI live-712 [seconds] [rear-filter] [height-filter] [gain] [prebuffer-ms]\n\n"
+        << L"SpatialAudioLab.CLI test-layout [seconds] [layout.ini] [gain] [safe|balanced|low]\n"
+        << L"SpatialAudioLab.CLI test-speaker [seconds] [layout.ini] [speaker] [gain] "
+           L"[safe|balanced|low]\n"
+        << L"SpatialAudioLab.CLI live-layout [seconds] [layout.ini] [gain] [prebuffer-ms] "
+           L"[safe|balanced|low]\n\n"
+        << L"SpatialAudioLab.CLI live-dtsx-layout [seconds] [layout.ini] [gain] [prebuffer-ms] "
+           L"[safe|balanced|low]\n\n"
+        << L"SpatialAudioLab.CLI live-pcm-layout [seconds] [layout.ini] [gain] [prebuffer-ms] "
+           L"[safe|balanced|low]\n\n"
+        << L"SpatialAudioLab.CLI live-nsp-layout [seconds] [layout.ini] [gain] [prebuffer-ms] "
+           L"[safe|balanced|low] [ring-name]\n\n"
+        << L"SpatialAudioLab.CLI live-eac3-layout [seconds] [layout.ini] [gain] [prebuffer-ms] "
+           L"[safe|balanced|low] [ring-name]\n\n"
+        << L"An empty endpoint filter selects the default render endpoint.\n";
+}
+} // namespace dolby
+
+int wmain(const int argc, wchar_t** argv) {
+    using namespace dolby;
+    try {
+        ComApartment apartment;
+        if (argc < 2) {
+            PrintUsage();
+            return 2;
+        }
+
+        const std::wstring command = Lowercase(argv[1]);
+        if (command == L"list") {
+            for (const auto& endpoint : EnumerateRenderEndpoints()) {
+                PrintEndpoint(endpoint);
+            }
+            return 0;
+        }
+
+        if (command == L"list-endpoints") {
+            for (const auto& endpoint : EnumerateRenderEndpoints()) {
+                std::cout << Utf8(endpoint.name) << '\t' << Utf8(endpoint.id) << '\n';
+            }
+            return 0;
+        }
+
+        if (command == L"list-endpoints-json") {
+            for (const auto& endpoint : EnumerateRenderEndpoints(true)) {
+                PrintEndpointJson(endpoint);
+            }
+            return 0;
+        }
+
+        if (command == L"set-default") {
+            const std::wstring filter = argc >= 3 ? argv[2] : L"1 - HISENSE (Virtual Audio Device";
+            SetDefaultEndpoint(filter);
+            return 0;
+        }
+
+        if (command == L"set-pcm714-format") {
+            const std::wstring filter = argc >= 3 ? argv[2] : L"1 - HISENSE (Virtual Audio Device";
+            SetNativePcm714Format(filter);
+            return 0;
+        }
+
+        if (command == L"set-codec-format") {
+            if (argc < 3) {
+                throw std::invalid_argument("set-codec-format requires atmos, mat10 or dtsx");
+            }
+            const std::wstring mode = Lowercase(argv[2]);
+            if (mode != L"atmos" && mode != L"mat10" && mode != L"dtsx") {
+                throw std::invalid_argument("set-codec-format requires atmos, mat10 or dtsx");
+            }
+            const std::wstring filter = argc >= 4 ? argv[3] : L"1 - HISENSE (Virtual Audio Device";
+            if (mode == L"mat10") {
+                SetLegacyMatFormat(filter);
+            } else {
+                SetSpatialCodecFormat(filter, mode == L"dtsx");
+            }
+            return 0;
+        }
+
+        if (command == L"device-format") {
+            const std::wstring filter = argc >= 3 ? argv[2] : L"1 - HISENSE (Virtual Audio Device";
+            PrintConfiguredFormats(filter);
+            return 0;
+        }
+
+        if (command == L"jack-info") {
+            const std::wstring filter = argc >= 3 ? argv[2] : L"1 - HISENSE (Virtual Audio Device";
+            PrintEndpointJackInfo(filter);
+            return 0;
+        }
+
+        if (command == L"capture") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 10.0;
+            std::wstring filter = argc >= 4 ? argv[3] : L"";
+            if (filter == L"-" || Lowercase(filter) == L"default") filter.clear();
+            const std::filesystem::path output = argc >= 5 ? argv[4] : L"capture.wav";
+            if (seconds <= 0.0 || seconds > 3600.0) {
+                throw std::runtime_error("Capture duration must be between 0 and 3600 seconds");
+            }
+            CaptureLoopback(seconds, filter, output);
+            return 0;
+        }
+
+        if (command == L"render-test") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 2.0;
+            std::wstring filter = argc >= 4 ? argv[3] : L"1 - HISENSE (Virtual Audio Device";
+            if (filter == L"-" || Lowercase(filter) == L"default") filter.clear();
+            const std::wstring mode = argc >= 5 ? Lowercase(argv[4]) : L"mat20";
+            if (seconds <= 0.0 || seconds > 60.0) {
+                throw std::runtime_error("Render duration must be between 0 and 60 seconds");
+            }
+            RenderTransportTest(seconds, filter, mode);
+            return 0;
+        }
+
+        if (command == L"replay-iec61937") {
+            if (argc < 3) {
+                throw std::runtime_error("replay-iec61937 requires an input WAV path");
+            }
+            const std::wstring filter = argc >= 4 ? argv[3] : L"1 - HISENSE (Virtual Audio Device";
+            const std::uint64_t repeatCount = argc >= 5 ? std::stoull(argv[4]) : 1;
+            if (repeatCount == 0 || repeatCount > 1'000) {
+                throw std::runtime_error("IEC 61937 repeat count must be between 1 and 1000");
+            }
+            ReplayIec61937Wave(argv[2], filter, repeatCount);
+            return 0;
+        }
+
+        if (command == L"spatial-test") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 2.0;
+            std::wstring filter = argc >= 4 ? argv[3] : L"1 - HISENSE (Virtual Audio Device";
+            if (filter == L"-" || Lowercase(filter) == L"default") filter.clear();
+            const std::wstring mode = argc >= 5 ? Lowercase(argv[4]) : L"712";
+            if (seconds <= 0.0 || seconds > 60.0) {
+                throw std::runtime_error("Spatial duration must be between 0 and 60 seconds");
+            }
+            SpatialSignalTest(seconds, filter, mode);
+            return 0;
+        }
+
+        if (command == L"extract-mat-712") {
+            if (argc < 4) throw std::runtime_error("Input and output WAV paths are required");
+            ExtractMat712Wave(argv[2], argv[3]);
+            return 0;
+        }
+
+        if (command == L"play-712") {
+            if (argc < 3) throw std::runtime_error("play-712 requires an input WAV path");
+            const std::wstring rearFilter = argc >= 4 ? argv[3] : L"Altavoces (Realtek(R) Audio)";
+            const std::wstring heightFilter = argc >= 5 ? argv[4] : L"2nd output";
+            const double gain = argc >= 6 ? std::stod(argv[5]) : 0.25;
+            const std::uint64_t repeatCount = argc >= 7 ? std::stoull(argv[6]) : 1;
+            PlayAnalog712(argv[2], rearFilter, heightFilter, gain, repeatCount);
+            return 0;
+        }
+
+        if (command == L"live-712") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 60.0;
+            const std::wstring rearFilter = argc >= 4 ? argv[3] : L"Altavoces (Realtek(R) Audio)";
+            const std::wstring heightFilter = argc >= 5 ? argv[4] : L"2nd output";
+            const double gain = argc >= 6 ? std::stod(argv[5]) : 0.25;
+            const DWORD prebufferMilliseconds =
+                argc >= 7 ? static_cast<DWORD>(std::stoul(argv[6])) : 80;
+            if (seconds <= 0.0 || seconds > 3'600.0 ||
+                prebufferMilliseconds < 20 || prebufferMilliseconds > 500) {
+                throw std::runtime_error(
+                    "live-712 requires 0 < seconds <= 3600 and 20 <= prebuffer-ms <= 500");
+            }
+            PlayLiveMat712(seconds, rearFilter, heightFilter, gain, prebufferMilliseconds);
+            return 0;
+        }
+
+        if (command == L"test-layout") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 30.0;
+            const std::filesystem::path layoutPath =
+                argc >= 4 ? argv[3] : L"configs\\realtek-c1u-714.ini";
+            const double gain = argc >= 5 ? std::stod(argv[4]) : 0.0;
+            const RendererLatencyMode latencyMode = argc >= 6
+                ? ParseRendererLatencyMode(argv[5])
+                : RendererLatencyMode::Safe;
+            if (seconds <= 0.0 || seconds > 3'600.0 || gain < 0.0 || gain > 1.0) {
+                throw std::runtime_error(
+                    "test-layout requires 0 < seconds <= 3600 and 0 <= gain <= 1");
+            }
+            TestSpeakerLayout(seconds, LoadSpeakerLayout(layoutPath), gain, {}, latencyMode);
+            return 0;
+        }
+
+        if (command == L"test-speaker") {
+            if (argc < 5) {
+                throw std::runtime_error(
+                    "test-speaker requires seconds, layout INI and speaker name");
+            }
+            const double seconds = std::stod(argv[2]);
+            const std::filesystem::path layoutPath = argv[3];
+            const std::wstring speakerName = argv[4];
+            const double gain = argc >= 6 ? std::stod(argv[5]) : 0.10;
+            const RendererLatencyMode latencyMode = argc >= 7
+                ? ParseRendererLatencyMode(argv[6])
+                : RendererLatencyMode::Safe;
+            if (seconds <= 0.0 || seconds > 60.0 || gain < 0.0 || gain > 1.0) {
+                throw std::runtime_error(
+                    "test-speaker requires 0 < seconds <= 60 and 0 <= gain <= 1");
+            }
+            TestSpeakerLayout(
+                seconds, LoadSpeakerLayout(layoutPath), gain, speakerName, latencyMode);
+            return 0;
+        }
+
+        if (command == L"live-layout") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 0.0;
+            const std::filesystem::path layoutPath =
+                argc >= 4 ? argv[3] : L"configs\\realtek-c1u-714.ini";
+            const double gain = argc >= 5 ? std::stod(argv[4]) : 0.25;
+            const DWORD prebufferMilliseconds =
+                argc >= 6 ? static_cast<DWORD>(std::stoul(argv[5])) : 40;
+            const RendererLatencyMode latencyMode = argc >= 7
+                ? ParseRendererLatencyMode(argv[6])
+                : RendererLatencyMode::Balanced;
+            if (seconds < 0.0 || seconds > 3'600.0 || gain < 0.0 || gain > 1.0 ||
+                prebufferMilliseconds < 20 || prebufferMilliseconds > 500) {
+                throw std::runtime_error(
+                    "live-layout requires 0 <= seconds <= 3600 (0 is unlimited), "
+                    "0 <= gain <= 1 and "
+                    "20 <= prebuffer-ms <= 500");
+            }
+            PlayLiveMatLayout(
+                seconds, layoutPath, gain, prebufferMilliseconds, latencyMode);
+            return 0;
+        }
+
+        if (command == L"live-dtsx-layout") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 0.0;
+            const std::filesystem::path layoutPath =
+                argc >= 4 ? argv[3] : L"configs\\realtek-c1u-714.ini";
+            const double gain = argc >= 5 ? std::stod(argv[4]) : 0.25;
+            const DWORD prebufferMilliseconds =
+                argc >= 6 ? static_cast<DWORD>(std::stoul(argv[5])) : 40;
+            const RendererLatencyMode latencyMode = argc >= 7
+                ? ParseRendererLatencyMode(argv[6])
+                : RendererLatencyMode::Balanced;
+            if (seconds < 0.0 || seconds > 3'600.0 || gain < 0.0 || gain > 1.0 ||
+                prebufferMilliseconds < 20 || prebufferMilliseconds > 500) {
+                throw std::runtime_error(
+                    "live-dtsx-layout requires 0 <= seconds <= 3600 (0 is unlimited), "
+                    "0 <= gain <= 1 and "
+                    "20 <= prebuffer-ms <= 500");
+            }
+            PlayLiveDtsXLayout(
+                seconds, layoutPath, gain, prebufferMilliseconds, latencyMode);
+            return 0;
+        }
+
+        if (command == L"live-pcm-layout") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 0.0;
+            const std::filesystem::path layoutPath =
+                argc >= 4 ? argv[3] : L"configs\\realtek-c1u-714.ini";
+            const double gain = argc >= 5 ? std::stod(argv[4]) : 0.25;
+            const DWORD prebufferMilliseconds =
+                argc >= 6 ? static_cast<DWORD>(std::stoul(argv[5])) : 40;
+            const RendererLatencyMode latencyMode = argc >= 7
+                ? ParseRendererLatencyMode(argv[6])
+                : RendererLatencyMode::Balanced;
+            if (seconds < 0.0 || seconds > 3'600.0 || gain < 0.0 || gain > 1.0 ||
+                prebufferMilliseconds < 20 || prebufferMilliseconds > 500) {
+                throw std::runtime_error(
+                    "live-pcm-layout requires 0 <= seconds <= 3600 (0 is unlimited), "
+                    "0 <= gain <= 1 and "
+                    "20 <= prebuffer-ms <= 500");
+            }
+            PlayLivePcmLayout(
+                seconds, layoutPath, gain, prebufferMilliseconds, latencyMode);
+            return 0;
+        }
+
+        if (command == L"omniphony-pcm") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 0.0;
+            const std::filesystem::path layoutPath =
+                argc >= 4 ? argv[3] : L"configs\\realtek-c1u-714.ini";
+            const double gain = argc >= 5 ? std::stod(argv[4]) : 0.25;
+            const DWORD prebufferMilliseconds =
+                argc >= 6 ? static_cast<DWORD>(std::stoul(argv[5])) : 40;
+            const RendererLatencyMode latencyMode = argc >= 7
+                ? ParseRendererLatencyMode(argv[6])
+                : RendererLatencyMode::Balanced;
+
+            if (seconds < 0.0 || seconds > 3'600.0 ||
+                gain < 0.0 || gain > 1.0 ||
+                prebufferMilliseconds < 20 ||
+                prebufferMilliseconds > 500) {
+                throw std::runtime_error(
+                    "omniphony-pcm requires 0 <= seconds <= 3600 (0 is unlimited), "
+                    "0 <= gain <= 1 and "
+                    "20 <= prebuffer-ms <= 500");
+            }
+
+            PlayLiveOmniphonyPcm(
+                seconds, layoutPath, gain, prebufferMilliseconds, latencyMode);
+            return 0;
+        }
+
+        // Two bridges share one implementation, separated only by their default ring.
+        // NSP_PCM714 carries NativeSpatialPipe's spatial capture; SAL_EAC3_PCM714 is the
+        // E-AC-3 passthrough bridge fed by Eac3Pipe714, and the two producers must never
+        // write into the same ring.
+        if (command == L"live-nsp-layout" || command == L"live-eac3-layout") {
+            const bool eac3Bridge = command == L"live-eac3-layout";
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 0.0;
+            const std::filesystem::path layoutPath =
+                argc >= 4 ? argv[3] : L"configs\\realtek-c1u-714.ini";
+            const double gain = argc >= 5 ? std::stod(argv[4]) : 0.25;
+            const DWORD prebufferMilliseconds =
+                argc >= 6 ? static_cast<DWORD>(std::stoul(argv[5])) : 40;
+            const RendererLatencyMode latencyMode = argc >= 7
+                ? ParseRendererLatencyMode(argv[6])
+                : RendererLatencyMode::Balanced;
+            const std::wstring ringName = argc >= 8
+                ? std::wstring(argv[7])
+                : std::wstring(eac3Bridge ? L"Local\\SAL_EAC3_PCM714"
+                                          : L"Local\\NSP_PCM714");
+
+            if (seconds < 0.0 || seconds > 3'600.0 ||
+                gain < 0.0 || gain > 1.0 ||
+                prebufferMilliseconds < 20 ||
+                prebufferMilliseconds > 500) {
+                throw std::runtime_error(
+                    eac3Bridge
+                        ? "live-eac3-layout requires 0 <= seconds <= 3600 (0 is unlimited), "
+                          "0 <= gain <= 1 and 20 <= prebuffer-ms <= 500"
+                        : "live-nsp-layout requires 0 <= seconds <= 3600 (0 is unlimited), "
+                          "0 <= gain <= 1 and 20 <= prebuffer-ms <= 500");
+            }
+
+            PlayLiveNspLayout(
+                seconds, layoutPath, gain, prebufferMilliseconds, latencyMode,
+                ringName);
+            return 0;
+        }
+
+        if (command == L"live-process-layout") {
+            if (argc < 4) {
+                throw std::runtime_error(
+                    "live-process-layout requires seconds and a process ID");
+            }
+            const double seconds = std::stod(argv[2]);
+            const auto processId = static_cast<DWORD>(std::stoul(argv[3]));
+            const std::filesystem::path layoutPath =
+                argc >= 5 ? argv[4] : L"configs\\realtek-c1u-714.ini";
+            const double gain = argc >= 6 ? std::stod(argv[5]) : 0.25;
+            const DWORD prebufferMilliseconds =
+                argc >= 7 ? static_cast<DWORD>(std::stoul(argv[6])) : 40;
+            const RendererLatencyMode latencyMode = argc >= 8
+                ? ParseRendererLatencyMode(argv[7])
+                : RendererLatencyMode::Balanced;
+            if (seconds < 0.0 || seconds > 3'600.0 || processId == 0 ||
+                gain < 0.0 || gain > 1.0 || prebufferMilliseconds < 20 ||
+                prebufferMilliseconds > 500) {
+                throw std::runtime_error(
+                    "live-process-layout requires 0 <= seconds <= 3600 "
+                    "(0 is unlimited), a process ID, 0 <= gain <= 1 and "
+                    "20 <= prebuffer-ms <= 500");
+            }
+            PlayLiveProcessLayout(seconds, processId, layoutPath, gain,
+                                  prebufferMilliseconds, latencyMode);
+            return 0;
+        }
+
+        if (command == L"capture-process") {
+            if (argc < 4) {
+                throw std::runtime_error("capture-process requires seconds and a process ID");
+            }
+            const double seconds = std::stod(argv[2]);
+            const auto processId = static_cast<DWORD>(std::stoul(argv[3]));
+            const std::filesystem::path output = argc >= 5 ? argv[4] : L"process-capture.wav";
+            const WORD channels = argc >= 6 ? static_cast<WORD>(std::stoul(argv[5])) : 8;
+            if (seconds <= 0.0 || seconds > 3600.0 || processId == 0 ||
+                (channels != 8 && channels != 12)) {
+                throw std::runtime_error(
+                    "Invalid capture duration, process ID or channel count (8 or 12)");
+            }
+            CaptureProcessLoopback(seconds, processId, output, channels);
+            return 0;
+        }
+
+        if (command == L"list-audio-decoders") {
+            const std::wstring filter = argc >= 3 ? argv[2] : L"";
+            const bool inspectTypes = argc >= 4 && Lowercase(argv[3]) == L"inspect";
+            ListAudioDecoders(filter, inspectTypes);
+            return 0;
+        }
+
+        if (command == L"probe-winrt-decoder") {
+            const std::wstring runtimeClass =
+                argc >= 3 ? argv[2] : L"DTSXDecoder.DTSXDecoder";
+            ProbeWinRtDecoder(runtimeClass);
+            return 0;
+        }
+
+        if (command == L"probe-spatial-metadata") {
+            const std::wstring filter = argc >= 3 ? argv[2] : L"1 - HISENSE (Virtual Audio Device";
+            ProbeSpatialMetadata(filter);
+            return 0;
+        }
+
+        if (command == L"probe-dtsx-license") {
+            const std::wstring codecName = argc >= 3 ? argv[2] : L"DTSXDecoder";
+            ProbeDtsXLicense(codecName);
+            return 0;
+        }
+
+        if (command == L"probe-dtsx-field-of-use") {
+            ProbeDtsXFieldOfUse();
+            return 0;
+        }
+
+        if (command == L"probe-dtsx-decode") {
+            if (argc < 3) {
+                throw std::runtime_error("probe-dtsx-decode requires an IEC 61937 WAV path");
+            }
+            const std::size_t maxBursts = argc >= 4 ? std::stoull(argv[3]) : 16;
+            if (maxBursts == 0 || maxBursts > 10'000) {
+                throw std::runtime_error("max-bursts must be between 1 and 10000");
+            }
+            const std::wstring mode = argc >= 5 ? Lowercase(argv[4]) : L"spatial";
+            if (mode != L"spatial" && mode != L"pcm") {
+                throw std::runtime_error("DTS:X output mode must be spatial or pcm");
+            }
+            const std::filesystem::path outputPath = argc >= 6 ? argv[5] : L"";
+            if (mode == L"spatial" && !outputPath.empty()) {
+                throw std::runtime_error("An output WAV path is valid only in pcm mode");
+            }
+            ProbeDtsXDecode(argv[2], maxBursts,
+                            mode == L"spatial" ? DtsXDecodeOutput::SpatialObjects
+                                               : DtsXDecodeOutput::Pcm71,
+                            outputPath);
+            return 0;
+        }
+
+        if (command == L"probe-media-types") {
+            if (argc < 3) throw std::runtime_error("probe-media-types requires an input path");
+            ProbeMediaTypes(argv[2]);
+            return 0;
+        }
+
+        if (command == L"capture-mat-ring") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 10.0;
+            const std::filesystem::path output = argc >= 4 ? argv[3] : L"mat-ring-capture.wav";
+            const DWORD pollMilliseconds = argc >= 5 ? static_cast<DWORD>(std::stoul(argv[4])) : 2;
+            if (seconds <= 0.0 || seconds > 600.0 || pollMilliseconds == 0 ||
+                pollMilliseconds > 1000) {
+                throw std::runtime_error(
+                    "Ring capture requires 0 < seconds <= 600 and 0 < poll-ms <= 1000");
+            }
+            CaptureMatRing(seconds, output, pollMilliseconds);
+            return 0;
+        }
+
+        if (command == L"capture-iec61937-ring") {
+            const double seconds = argc >= 3 ? std::stod(argv[2]) : 10.0;
+            const std::filesystem::path output = argc >= 4 ? argv[3] : L"iec61937-ring-capture.wav";
+            const DWORD pollMilliseconds = argc >= 5 ? static_cast<DWORD>(std::stoul(argv[4])) : 2;
+            if (seconds <= 0.0 || seconds > 600.0 || pollMilliseconds == 0 ||
+                pollMilliseconds > 1000) {
+                throw std::runtime_error(
+                    "Ring capture requires 0 < seconds <= 600 and 0 < poll-ms <= 1000");
+            }
+            CaptureIec61937Ring(seconds, output, pollMilliseconds);
+            return 0;
+        }
+
+        if (command == L"ec3-record") {
+            if (argc < 3) throw std::runtime_error("ec3-record requires an output .ec3 path");
+            const std::filesystem::path output = argv[2];
+            const DWORD pollMilliseconds = argc >= 4 ? static_cast<DWORD>(std::stoul(argv[3])) : 2;
+            if (pollMilliseconds == 0 || pollMilliseconds > 1000) {
+                throw std::runtime_error("ec3-record requires 0 < poll-ms <= 1000");
+            }
+            RecordEc3Stream(output, pollMilliseconds);
+            return 0;
+        }
+
+        if (command == L"ec3-pipe") {
+            const std::wstring pipeName =
+                argc >= 3 ? argv[2] : L"SpatialAudioLab.Eac3";
+            const DWORD pollMilliseconds = argc >= 4 ? static_cast<DWORD>(std::stoul(argv[3])) : 2;
+            if (pollMilliseconds == 0 || pollMilliseconds > 1000) {
+                throw std::runtime_error("ec3-pipe requires 0 < poll-ms <= 1000");
+            }
+            StreamEc3ToPipe(pipeName, pollMilliseconds);
+            return 0;
+        }
+
+        if (command == L"mat-pipe") {
+            const std::wstring pipeName =
+                argc >= 3 ? argv[2] : L"SpatialAudioLab.Mlp";
+            const DWORD pollMilliseconds = argc >= 4 ? static_cast<DWORD>(std::stoul(argv[3])) : 2;
+            if (pollMilliseconds == 0 || pollMilliseconds > 1000) {
+                throw std::runtime_error("mat-pipe requires 0 < poll-ms <= 1000");
+            }
+            StreamMatToPipe(pipeName, pollMilliseconds);
+            return 0;
+        }
+
+        if (command == L"mat-record") {
+            if (argc < 3) throw std::runtime_error("mat-record requires an output .mlp path");
+            const std::filesystem::path output = argv[2];
+            // Optional: mat-record output.mlp [seconds] [poll-ms]. When seconds>0
+            // the capture auto-stops; otherwise it runs until a STOP command.
+            const double seconds = argc >= 4 ? std::stod(argv[3]) : 0.0;
+            const DWORD pollMilliseconds = argc >= 5 ? static_cast<DWORD>(std::stoul(argv[4])) : 2;
+            if (pollMilliseconds == 0 || pollMilliseconds > 1000) {
+                throw std::runtime_error("mat-record requires 0 < poll-ms <= 1000");
+            }
+            if (seconds < 0.0 || seconds > 3600.0) {
+                throw std::runtime_error("mat-record duration must be between 0 and 3600 seconds");
+            }
+            RecordMatMlpStream(output, pollMilliseconds, seconds);
+            return 0;
+        }
+
+        if (command == L"mat-demux-raw") {
+            if (argc < 4) throw std::runtime_error("mat-demux-raw requires <raw.bin> <output.mlp>");
+            DemuxRawCarrier(argv[2], argv[3]);
+            return 0;
+        }
+
+        if (command == L"ec3-status") {
+            PrintEc3Status();
+            return 0;
+        }
+
+        if (command == L"driver-format-log") {
+            if (argc >= 3 && Lowercase(argv[2]) == L"reset") {
+                ResetDriverFormatLog();
+            } else if (argc >= 3) {
+                throw std::runtime_error(
+                    "driver-format-log accepts only the optional reset argument");
+            } else {
+                PrintDriverFormatLog();
+            }
+            return 0;
+        }
+
+        if (command == L"analyze") {
+            if (argc < 3) throw std::runtime_error("analyze requires an input WAV path");
+            AnalyzeFloatWave(argv[2]);
+            return 0;
+        }
+
+        if (command == L"analyze-iec61937") {
+            if (argc < 3) throw std::runtime_error("analyze-iec61937 requires an input WAV path");
+            AnalyzeIec61937Wave(argv[2]);
+            return 0;
+        }
+
+        if (command == L"extract-dtshd") {
+            if (argc < 4) throw std::runtime_error("extract-dtshd requires input and output paths");
+            ExtractDtsHdWave(argv[2], argv[3]);
+            return 0;
+        }
+
+        if (command == L"analyze-dtsx-exss") {
+            if (argc < 3) {
+                throw std::runtime_error("analyze-dtsx-exss requires an input DTS path");
+            }
+            AnalyzeDtsXExss(argv[2]);
+            return 0;
+        }
+
+        if (command == L"analyze-mat") {
+            if (argc < 3) throw std::runtime_error("analyze-mat requires an input WAV path");
+            AnalyzeMatWave(argv[2]);
+            return 0;
+        }
+
+        if (command == L"analyze-mat-layout") {
+            if (argc != 4) {
+                throw std::runtime_error(
+                    "analyze-mat-layout requires an input WAV and a layout INI");
+            }
+            AnalyzeMatLayout(argv[2], argv[3]);
+            return 0;
+        }
+
+        if (command == L"compare-mat-positions") {
+            if (argc != 8) {
+                throw std::runtime_error(
+                    "compare-mat-positions requires origin, left, right, above, front and behind WAV paths");
+            }
+            CompareMatPositionFixtures({argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]});
+            return 0;
+        }
+
+        if (command == L"analyze-mat-positions") {
+            if (argc != 3) {
+                throw std::runtime_error("analyze-mat-positions requires an input WAV path");
+            }
+            AnalyzeMatPositionTimeline(argv[2]);
+            return 0;
+        }
+
+        PrintUsage();
+        return 2;
+    } catch (const std::exception& error) {
+        std::cerr << "error: " << error.what() << '\n';
+        return 1;
+    }
+}

@@ -1,0 +1,228 @@
+# Cavern
+The bleeding edge audio framework that gives you Dolby Atmos and top end room
+correction on any sound system. Cavern is also an all-in-one toolkit for game
+audio development and the swiss army knife of filtering and measurement tools
+with a leading performance among C# implementations.
+
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/VoidXH/Cavern/Build.yml)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/VoidXH/Cavern)](https://github.com/VoidXH/Cavern/releases/latest)
+![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/VoidXH/Cavern/latest)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/087eefd2734a48c08e6b4b1006f84021)](https://app.codacy.com/gh/VoidXH/Cavern)
+
+[![NuGet - Cavern](https://img.shields.io/nuget/v/Cavern?label=NuGet%3A%20Cavern)](https://www.nuget.org/packages/Cavern/)
+[![NuGet - Cavern.Format](https://img.shields.io/nuget/v/Cavern.Format?label=NuGet%3A%20Cavern.Format)](https://www.nuget.org/packages/Cavern.Format/)
+[![NuGet - Cavern.QuickEQ](https://img.shields.io/nuget/v/Cavern.QuickEQ?label=NuGet%3A%20Cavern.QuickEQ)](https://www.nuget.org/packages/Cavern.QuickEQ/)
+
+## Features
+* Unlimited objects and output channels without position restrictions
+* Supports lots of immersive formats, including Dolby Atmos
+* Advanced self-calibration with a microphone
+	* Reaches the desired targets with <0.01 dB and <0.01 ms of uniformity
+	* Sound bubble creation without a calibration file
+	* Multi-sub handling that can use not just the subs to flatten the bass in the room
+* Direction and distance virtualization for headphones
+* Filter engine with the most common filters seamlessly integrated into the renderer
+* Measurement subsystem for science projects
+* Real-time upconversion of regular surround sound mixes to 3D
+* Mix repositioning based on occupied seats
+* Seat movement generation
+* Ultra low latency, even the upconverter can work from as low as one sample per frame
+* Unity-like listener and source functionality
+* Fixes for Unity's Microphone API
+	* Works in WebGL too
+
+
+### Supported codecs
+* Meridian Lossless Packing (Dolby TrueHD Atmos, in Cavernize only, with Truehdd)
+* E-AC-3 with Joint Object Coding (Dolby Digital Plus Atmos)
+* Limitless Audio Format
+* RIFF WAVE
+* Core Audio Format
+* Audio Definition Model Broadcast Wave Format
+* Dolby Atmos Master Format
+* Supported containers: .ac3, .eac3, .ec3, .laf, .m4a, .m4v, .mka, .mkv, .mov, .mp4, .qt, .wav, .weba, .webm
+
+### Supported software/hardware for EQ export
+* PC, Mac, and Linux: Equalizer APO, CamillaDSP, AU N-Band EQ
+* DSP: MiniDSP 2x4 Advanced, 2x4 HD, DDRC-88A, Flex HT(x), Tide16
+* AVRs and processors: Acurus Muse, Emotiva, Monolith HTP-1, Rotel, StormAudio, Tonewinner AT series, WiiM, Yamaha CX-A, RX, RX-A series
+* Amplifiers: Behringer NX series
+* Others: Audyssey MultEQ-X, Dirac Live, JL Audio T�N, Roon, Wavelet
+
+## User documentation
+User documentation can be found at the [Cavern documentation webpage](http://cavern.sbence.hu/cavern/doc.php).
+Please go to this page for basic setup, in-depth QuickEQ tutorials, and
+command-line arguments.
+
+The full list of changes for each version can be found in [CHANGELOG.md](./CHANGELOG.md).
+
+## How to build
+### Cavern
+Cavern is a .NET Standard project with no dependencies. Open the `Cavern.sln`
+solution with Microsoft Visual Studio 2022 or later and all projects should
+build.
+
+### Sample projects
+These examples use the Cavern library to show how it works. The solution
+containing all sample projects is found at `CavernSamples/CavernSamples.sln`.
+The same build instructions apply as to the base project.
+
+Single-purpose sample codes are found under `docs/Code samples`.
+
+### Cavern for Unity
+Open the `CavernUnity DLL.sln` solution with Microsoft Visual Studio 2022.
+Remove the references from the CavernUnity DLL project to UnityEngine and
+UnityEditor. Add these files from your own Unity installation as references.
+They are found in `Editor\Data\Managed` under Unity's installation folder.
+
+### CavernAmp
+This is a g++ project, so g++ has to be available in PATH. No additional
+libraries were used, this is standard C++17 code, so importing just the .cpp and
+.h files into any IDE will work perfectly.
+
+## Library quick start
+### Clip
+Cavern is using audio clips to render the audio scene. A `Clip` is basically a
+single audio file, which can be an effect or music. The easiest method of
+loading from a file is through the `Cavern.Format` library, which will
+auto-detect the format:
+```cs
+Clip clip = AudioReader.ReadClip(pathToFile);
+```
+Refer to the [scripting API](http://cavern.sbence.hu/cavern/doc.php?if=api/Cavern/Clip/index)
+for the complete description of this object.
+
+### Listener
+The `Listener` is the center of the sound stage, which will render the audio
+sources attached to it. The listener has a `Position` and `Rotation` (Euler
+angles, degrees) field for spatial placement. All sources will be rendered
+relative to it. Here's its creation:
+```cs
+Listener listener = new Listener() {
+    SampleRate = 48000, // Match this with your output
+    UpdateRate = 256 // Match this with your buffer size
+};
+```
+The `Listener` will set up itself automatically with the user's saved
+configuration. The used audio channels can be queried through
+`Listener.Channels`, which should be respected, and the output audio channel
+count should be set to its length. If this is not possible, the layout could be
+set to a standard by the number of channels, for example, this line will set up
+all listeners to 5.1:
+```cs
+Listener.ReplaceChannels(6);
+```
+Refer to the [scripting API](http://cavern.sbence.hu/cavern/doc.php?if=api/Cavern/Listener/index)
+for the complete description of this object.
+
+### Source
+This is an audio placed in the sound space, renders a `Clip` at where it's
+positioned relative to the `Listener`. Here's how to create a new source at a
+given position and attach it to the listener:
+```cs
+Source source = new Source() {
+    Clip = clip,
+    Position = new Vector3(10, 0, 0)
+};
+listener.AttachSource(source);
+```
+Sources that are no longer used should be detached from the listener using
+`DetachSource`. Refer to the [scripting API](http://cavern.sbence.hu/cavern/doc.php?if=api/Cavern/Source/index)
+for the complete description of this object.
+
+### Rendering
+To generate the output of the audio space and get the audio samples which should
+be output to the system, use the following line:
+```cs
+float[] output = listener.Render();
+```
+The length of this array is `listener.UpdateRate * Listener.Channels.Length`.
+
+### Working with audio files
+The `Cavern.Format` library handles reading and writing audio files. For custom
+rendering or transcoding, they can be handled on a lower level than loading a
+`Clip`.
+
+#### Reading
+To open any supported audio file for reading, use the following static function:
+```cs
+AudioReader reader = AudioReader.Open(string path);
+```
+There is an overload for `AudioReader.Open` to read audio files from an
+arbitrary `Stream`. After opening a file, the following workflows are available.
+
+##### Getting all samples
+The `Read()` function of an `AudioReader` returns all samples from the file in
+an interlaced array with the size of `reader.ChannelCount * reader.Length`.
+
+##### Getting the samples block by block
+For real-time use or cases where progress should be displayed, an audio file can
+be read block-by-block. First, the header must be read, this is not done
+automatically. Until the header is not read, metadata like length or channel
+count are unavailable. Header reading is accomplished by calling
+`reader.ReadHeader()`.
+
+The `ReadBlock(float[] samples, long from, long to)` function of an
+`AudioReader` reads the next interlaced sample block to the specified array in
+the specified index range. Samples are counted for all channels. A version of
+`ReadBlock` for multichannel arrays (`float[channel][sample]`) is also
+available, but in this case, the index range is given for a single channel.
+
+Seeking in local files are supported by calling `reader.Seek(long sample)`. The
+time in `sample`s is relative to `reader.Length`, which means it's per a single
+channel.
+
+##### Rendering in an environment
+The `reader.GetRenderer()` function returns a `Renderer` instance that creates
+`Source`s for each channel or audio object. These can be retrieved from the
+`Objects` property of the renderer. When all of them are attached to a
+`Listener`, they will handle fetching the samples. Seeking the reader or the
+renderer works in this use case.
+
+#### Writing
+To create an audio file, use an `AudioWriter`:
+```cs
+AudioWriter writer = AudioWriter.Create(string path, int channelCount, long length, int sampleRate, BitDepth bits);
+```
+This will create the `AudioWriter` for the appropriate file extension if it's
+supported.
+
+Just like `AudioReader`, an `AudioWriter` can be used with a single call
+(`Write(float[] samples)` or `Write(float[][] samples)`) or block by block
+(`WriteHeader()` and `WriteBlock(float[] samples, long from, long to)`).
+
+## Unity quick start
+Cavern works exactly the same way as Unity's audio engine, only the names are
+different. For `AudioSource`, there's `AudioSource3D`, and for `AudioListener`,
+there's `AudioListener3D`, and so on. You will find all Cavern components in the
+component browser, under audio, and they will automatically add all their Unity
+dependencies.
+
+## Development documents
+* [Knowledge base](./docs)
+* [API browser](http://cavern.sbence.hu/cavern/doc.php?if=api/index) with descriptions of all public members for all public classes
+* [Virtualizer repository](https://github.com/VoidXH/HRTF) which contains the raw IR measurements and detailed information about their use
+
+## Disclaimers
+### Code
+Cavern is a performance software written in an environment that wasn't made for
+it. This means that clean code policies like DRY are broken many times if the
+code is faster this way, usually by orders of magnitude. Most changes should be
+benchmarked in the target environment, and the fastest code should be chosen,
+regardless of how bad it looks. This, however, can't result in inconsistent
+interfaces. In that case, wrappers should be used with the least possible method
+calls.
+
+### Driver
+While Cavern itself is open-source, the setup utility and most converter
+interfaces are not, because they are built on licences not allowing it. However,
+their functionality is almost entirely using this plugin. Builds can be
+downloaded from the [Cavern website](http://cavern.sbence.hu).
+
+## Licence
+By downloading, using, copying, modifying, or compiling the source code or a
+build, you are accepting the licence [available here](LICENSE.md).
+
+This licence heavily discourages commercial usage. If you're not supporting the
+open source community with your work, you will need to contact the original
+author for a Cavern Pro licence through the Cavern website's contact form.

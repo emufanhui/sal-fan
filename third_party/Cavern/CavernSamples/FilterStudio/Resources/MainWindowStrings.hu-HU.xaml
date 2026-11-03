@@ -1,0 +1,107 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:system="clr-namespace:System;assembly=mscorlib">
+    <system:String x:Key="MFile">_Fájl</system:String>
+    <system:String x:Key="OpNew">_Új konfigurációs fájl</system:String>
+	<system:String x:Key="OpCfg">_Konfigurációs fájl megnyitása...</system:String>
+    <system:String x:Key="OpSaA">Konfigurációs fájl mentése _ehhez</system:String>
+    <system:String x:Key="OpChs">_Csatornák kiválasztása...</system:String>
+
+    <system:String x:Key="MFilt">_Szűrők</system:String>
+    <system:String x:Key="FShif">_Párhuzamos hozzáadás (Shift nyomva tartásával azonos)</system:String>
+    <system:String x:Key="FLabe">_Címke</system:String>
+    <system:String x:Key="FGain">_Erősítés</system:String>
+    <system:String x:Key="FDela">_Késleltetés</system:String>
+    <system:String x:Key="FComb">_Fésű</system:String>
+    <system:String x:Key="FEcho">_Visszhang</system:String>
+    <system:String x:Key="FBiqu">E_gyszerű parametrikus szűrő...</system:String>
+    <system:String x:Key="FGrEQ">_Grafikus EQ...</system:String>
+    <system:String x:Key="FConv">K_onvolúció...</system:String>
+    <system:String x:Key="OpCoF">Kiválasztott szűrő konvertálása konvolúcióvá... (visszavonhatatlan)</system:String>
+    <system:String x:Key="CoCoF">Konvertálás konvolúcióvá... (visszavonhatatlan)</system:String>
+    <system:String x:Key="OpDel">Kiválasztott szűrő _törlése</system:String>
+    <system:String x:Key="CoDel">_Törlés</system:String>
+
+    <system:String x:Key="MGrap">_Gráf</system:String>
+    <system:String x:Key="SmDir">_Irány</system:String>
+    <system:String x:Key="SOpTB">_Fentről le</system:String>
+    <system:String x:Key="SOpLR">_Balról jobbra</system:String>
+    <system:String x:Key="SOpBT">_Lentről fel</system:String>
+    <system:String x:Key="SOpRL">_Jobbról balra</system:String>
+    <system:String x:Key="OpRec">_Középre mozgatás</system:String>
+    <system:String x:Key="OpCon">K_onvertálás konvolúcióvá... (szűrőegyesítés, visszavonhatatlan)</system:String>
+
+    <system:String x:Key="MPipe">Szű_rőszettek</system:String>
+    <system:String x:Key="OpAdP">Ü_res szett hozzáadása a kiválasztott szett elé</system:String>
+    <system:String x:Key="OpAdC">K_eresztváltó hozzáadása a kiválasztott szett elé...</system:String>
+    <system:String x:Key="LabXO">Keresztváltó</system:String>
+    <system:String x:Key="OpSol">Új konfigurációs _fájl létrehozása a kiválasztott szettből</system:String>
+    <system:String x:Key="CoSol">Új konfigurációs _fájl létrehozása ebből</system:String>
+    <system:String x:Key="OpMeN">Kiválasztott e_gyesítése a következő szettel (visszavonhatatlan)</system:String>
+    <system:String x:Key="CoMeN">E_gyesítés a következő szettel (visszavonhatatlan)</system:String>
+    <system:String x:Key="OpMer">_Összes szett egyesítése (visszavonhatatlan)</system:String>
+    <system:String x:Key="OpExp">Kiválasztott szett _exportálása eszközre</system:String>
+    <system:String x:Key="CoExp">_Exportálás eszközre</system:String>
+    <system:String x:Key="OpSim">Kiválasztott szett _szimulálása WAV-ba</system:String>
+    <system:String x:Key="CoSim">_Szimuláció WAV-ba</system:String>
+    <system:String x:Key="OpRen">Kiválasztott szett _átnevezése</system:String>
+    <system:String x:Key="CoRen">_Átnevezés</system:String>
+    <system:String x:Key="OpCle">Kiválasztott szett _kiürítése</system:String>
+    <system:String x:Key="CoCle">_Kiürítés</system:String>
+    <system:String x:Key="OpDeP">Kiválasztott szett _törlése</system:String>
+    <system:String x:Key="ExpFN">Cavern Filter Studio export</system:String>
+    <system:String x:Key="files">fájlok</system:String>
+
+    <system:String x:Key="MHelp">Sú_gó</system:String>
+    <system:String x:Key="OpShI">_Segítség mutatása</system:String>
+    <system:String x:Key="OpAbo">_Névjegy</system:String>
+
+    <system:String x:Key="TProp">Tulajdonság</system:String>
+    <system:String x:Key="TValu">Érték</system:String>
+    <system:String x:Key="Help1">Jobb klikkelj egy szűrőre, hogy új szűrőútvonalat indíts belőle.</system:String>
+    <system:String x:Key="Help2">Jobb klikkelj egy nyílra, hogy új szűrőt adj hozzá két szűrő közé.</system:String>
+    <system:String x:Key="Help3">Húzz egy szűrőt lenyomott egérgombbal a másikba, hogy összekösd őket.</system:String>
+    <system:String x:Key="SySaR">Rendszer mintavételezési frekvenciája:</system:String>
+
+    <system:String x:Key="OpFil">Minden támogatott formátum|*.cbf;*.cfs;*.txt|Cavern Filter Studio|*.cfs|Convolution Box Format|*.cbf|Equalizer
+        APO konfigurációk|*.txt</system:String>
+    <system:String x:Key="Succe">Siker</system:String>
+    <system:String x:Key="ExSuc">Sikeres export.</system:String>
+    <system:String x:Key="Error">Hiba</system:String>
+    <system:String x:Key="NOpen">Egy konfigurációs fájl szerkesztés alatt van.
+        A csatornakonfiguráció csak új konfigurációs fájl létrehozásakor lesz alkalmazva.</system:String>
+    <system:String x:Key="NLoad">A konfigurációs fájl betöltése nem sikerült: {0}</system:String>
+    <system:String x:Key="NChan">Nem lettek kiválasztva csatornák, a csatornakonfiguráció nem változott.</system:String>
+    <system:String x:Key="NNode">Nincs kiválasztva csúcspont.</system:String>
+    <system:String x:Key="NoCon">Kérlek, előbb hozz létre vagy tölts be egy konfigurációs fájlt.</system:String>
+    <system:String x:Key="NFNod">Kérlek, előbb jelölj ki egy szűrő csúcspontot.</system:String>
+    <system:String x:Key="NPNod">Kérlek, előbb jelölj ki egy lépést.</system:String>
+    <system:String x:Key="NFFir">Bemenet elé nem adható hozzá szűrőszett lépés.</system:String>
+    <system:String x:Key="NFLas">Kimenetek után nem adható hozzá szűrő.</system:String>
+    <system:String x:Key="NFInp">Egy csatorna bemenete nem törölhető.</system:String>
+    <system:String x:Key="NFOut">Egy csatorna kimenete nem törölhető.</system:String>
+    <system:String x:Key="NCoIn">Egy csatorna bemenete nem konvertálható.</system:String>
+    <system:String x:Key="NCoOu">Egy csatorna kimenete nem konvertálható.</system:String>
+    <system:String x:Key="NCInp">Szűrök nem köthetők bemenetbe.</system:String>
+    <system:String x:Key="NCOut">Kimenetek nem köthetők szűrőkbe.</system:String>
+    <system:String x:Key="NLoop">Ez az összeköttetés érvénytelen, mert kört okozna a gráfban.</system:String>
+    <system:String x:Key="NLaSP">Az utolsó megmaradt lépés nem törölhető.</system:String>
+    <system:String x:Key="NLaMe">Az utolsó lépés nem egyesíthető következő lépéssel.</system:String>
+    <system:String x:Key="NLaEd">Az utolsó megmaradt kapcsolat nem törölhető.</system:String>
+    <system:String x:Key="NPiSi">Ez a művelet érvénytelen a szűrőszett lépések bemeneti és kimeneti pontján.</system:String>
+    <system:String x:Key="NUnSR">Nem támogatott mintavételezési frekvencia.
+        A konfigurációs fájl betöltve, de valószínűleg sérült.</system:String>
+    <system:String x:Key="NUnFi">Az exportálási formátum nem támogatja ezt a szűrőt: {0}.
+        A konvolúcióvá konvertálása lehetővé teszi az exportot.</system:String>
+
+    <system:String x:Key="Warni">Figyelmeztetés</system:String>
+    <system:String x:Key="WSaRe">A következő szűrő mintavételezési frekvenciája nem egyezik a rendszerével: {0}. {1} Hz helyett {2} Hz.
+        Ez elronthatja az exportált konfigurációs fájlt. Biztosan exportálni szeretnél?</system:String>
+
+    <system:String x:Key="NSNew">Új</system:String>
+    <system:String x:Key="NInpu">Bemenet</system:String>
+    <system:String x:Key="NOutp">Kimenet</system:String>
+    <system:String x:Key="NLabe">Új címke</system:String>
+
+    <system:String x:Key="HAbou">Névjegy</system:String>
+</ResourceDictionary>

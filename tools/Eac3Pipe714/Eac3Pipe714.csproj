@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Eac3Pipe714</AssemblyName>
+    <RootNamespace>Eac3Pipe714</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\third_party\Cavern\Cavern.Format\Cavern.Format.csproj" />
+  </ItemGroup>
+
+</Project>

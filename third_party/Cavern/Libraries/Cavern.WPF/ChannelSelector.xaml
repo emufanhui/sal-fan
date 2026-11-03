@@ -1,0 +1,74 @@
+﻿<base:OkCancelDialog x:Class="Cavern.WPF.ChannelSelector"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:base="clr-namespace:Cavern.WPF.BaseClasses"
+        mc:Ignorable="d"
+        Title="{StaticResource Title}" Width="570" Height="350">
+    <Window.Resources>
+        <d:ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Resources/ChannelSelectorStyle.xaml"/>
+                <ResourceDictionary Source="Resources/CommonStrings.xaml"/>
+                <ResourceDictionary Source="Resources/ChannelSelectorStrings.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </d:ResourceDictionary>
+    </Window.Resources>
+    <Grid>
+        <TextBlock Margin="10,10,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Width="230"
+                   Text="{StaticResource GroLa}" TextAlignment="Center" FontSize="15"/>
+        <Rectangle Margin="26,50,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Width="200" Height="200" Stroke="Black"/>
+        <CheckBox Name="frontLeft" Margin="10,35,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGFL}"/>
+        <CheckBox Name="frontLeftCenter" Margin="60,35,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpFLC}"/>
+        <CheckBox Name="frontCenter" Margin="110,35,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGFC}"/>
+        <CheckBox Name="frontRightCenter" Margin="160,35,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpFRC}"/>
+        <CheckBox Name="frontRight" Margin="210,35,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGFR}"/>
+        <CheckBox Name="wideLeft" Margin="10,85,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGWL}"/>
+        <CheckBox Name="wideRight" Margin="210,85,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGWR}"/>
+        <CheckBox Name="sideLeft" Margin="10,135,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGSL}"/>
+        <CheckBox Name="screenLFE" Margin="110,135,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpLFE}"/>
+        <CheckBox Name="sideRight" Margin="210,135,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGSR}"/>
+        <CheckBox Name="rearLeft" Margin="10,235,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGRL}"/>
+        <CheckBox Name="rearCenter" Margin="110,235,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGRC}"/>
+        <CheckBox Name="rearRight" Margin="210,235,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpGRR}"/>
+        <TextBlock Margin="310,10,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Width="230"
+                   Text="{StaticResource TopLa}" TextAlignment="Center" FontSize="15"/>
+        <Rectangle Margin="326,50,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Width="200" Height="200" Stroke="Black"/>
+        <CheckBox Name="topFrontLeft" Margin="310,35,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTFL}"/>
+        <CheckBox Name="topFrontCenter" Margin="410,35,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTFC}"/>
+        <CheckBox Name="topFrontRight" Margin="510,35,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTFR}"/>
+        <CheckBox Name="topSideLeft" Margin="310,135,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTSL}"/>
+        <CheckBox Name="godsVoice" Margin="410,135,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTGV}"/>
+        <CheckBox Name="topSideRight" Margin="510,135,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTSR}"/>
+        <CheckBox Name="topRearLeft" Margin="310,235,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTRL}"/>
+        <CheckBox Name="topRearCenter" Margin="410,235,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTRC}"/>
+        <CheckBox Name="topRearRight" Margin="510,235,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Style="{StaticResource x2}"
+                  ToolTip="{StaticResource SpTRR}"/>
+        <Button Margin="0,0,95,10" Width="80" Height="20" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Content="{StaticResource BtnOk}" Click="OK"/>
+        <Button Margin="0,0,10,10" Width="80" Height="20" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Content="{StaticResource BtnCa}" Click="Cancel"/>
+    </Grid>
+</base:OkCancelDialog>

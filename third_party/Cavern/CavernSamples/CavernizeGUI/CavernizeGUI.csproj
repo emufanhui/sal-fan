@@ -1,0 +1,90 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<Nullable>disable</Nullable>
+		<UseWPF>true</UseWPF>
+		<UseWindowsForms>true</UseWindowsForms>
+		<Copyright>Copyright © Bence Sgánetz 2016-2026</Copyright>
+		<Description>Sample GUI spatial upconverter with Cavern's renderer.</Description>
+		<ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+		<DebugType>full</DebugType>
+		<Authors>VoidX</Authors>
+		<Product>Cavernize</Product>
+		<PackageProjectUrl>https://cavern.sbence.hu/</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/VoidXH/Cavern/</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<NeutralLanguage>en</NeutralLanguage>
+		<ApplicationIcon>..\Icon.ico</ApplicationIcon>
+		<StartupObject>CavernizeGUI.Program</StartupObject>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<DebugSymbols>false</DebugSymbols>
+		<DebugType>none</DebugType>
+		<Optimize>true</Optimize>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3179.45" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Include="..\VoidX.WPF\FFmpeg\FFmpegGUI.cs" Link="VoidX.WPF\FFmpeg\FFmpegGUI.cs" />
+		<Compile Include="..\VoidX.WPF\UpdateCheck.cs" Link="VoidX.WPF\UpdateCheck.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\Cavern.Format\Cavern.Format.csproj" />
+		<ProjectReference Include="..\..\Cavern\Cavern.csproj" />
+		<ProjectReference Include="..\..\Libraries\Cavern.WPF\Cavern.WPF.csproj" />
+		<ProjectReference Include="..\Reusable\Cavernize.Logic\Cavernize.Logic.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Resource Include="..\_Common\CavernLogo.png" Link="Resources\CavernLogo.png" />
+		<Resource Include="Resources\Images\AddToQueue.png" />
+		<Resource Include="Resources\Images\Delete.png" />
+		<Resource Include="Resources\Images\Folder.png" />
+		<Resource Include="Resources\Images\Help.png" />
+		<Resource Include="Resources\Images\Language.png" />
+		<Resource Include="Resources\Images\Render.png" />
+		<Resource Include="Resources\Images\RenderQueue.png" />
+		<Resource Include="Resources\Images\Settings.png" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Page Include="..\_Common\Styles.xaml" Link="Resources\Styles.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Update="Resources\Settings.Designer.cs">
+			<DesignTimeSharedInput>True</DesignTimeSharedInput>
+			<AutoGen>True</AutoGen>
+			<DependentUpon>Settings.settings</DependentUpon>
+		</Compile>
+		<Compile Update="Resources\UpmixingSettings.Designer.cs">
+			<DesignTimeSharedInput>True</DesignTimeSharedInput>
+			<AutoGen>True</AutoGen>
+			<DependentUpon>UpmixingSettings.settings</DependentUpon>
+		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="Resources\Settings.settings">
+			<Generator>SettingsSingleFileGenerator</Generator>
+			<LastGenOutput>Settings.Designer.cs</LastGenOutput>
+		</None>
+		<None Update="Resources\UpmixingSettings.settings">
+			<Generator>SettingsSingleFileGenerator</Generator>
+			<LastGenOutput>UpmixingSettings.Designer.cs</LastGenOutput>
+		</None>
+	</ItemGroup>
+
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(Configuration)' == 'Release'">
+		<Exec Command="del /s /q bin\*.xml" />
+		<Exec Command="del /s /q bin\*.pdb" />
+	</Target>
+</Project>

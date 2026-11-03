@@ -1,0 +1,89 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup />
+  <ItemGroup>
+    <Compile Update="BiquadEditor.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="ChannelSelector.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="Controls\GraphRendererControl.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="Controls\LabeledSlider.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="Controls\StandardLayoutDisplay.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="ConvolutionEditor.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="Dialogs\ImageDialog.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="EQEditor.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="FilterSetTargetSelector.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="BiquadEditor.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="ChannelSelector.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Controls\GraphRendererControl.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="ConvolutionEditor.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="EQEditor.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\BiquadEditorStrings.hu-HU.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\BiquadEditorStrings.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\ChannelSelectorStrings.hu-HU.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\ChannelSelectorStrings.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\ChannelSelectorStyle.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\CommonStrings.hu-HU.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\CommonStrings.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\ConvolutionEditorStrings.hu-HU.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\ConvolutionEditorStrings.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\CrossoverStrings.hu-HU.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\CrossoverStrings.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\EQEditorStrings.hu-HU.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Resources\EQEditorStrings.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
+</Project>

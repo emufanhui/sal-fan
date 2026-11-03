@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Windows 10 2004+ is required for the SystemMediaTransportControls
+         session APIs used to detect Apple Music track changes. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SpatialAudioLab.Ec3Recorder</AssemblyName>
+    <RootNamespace>Ec3Recorder</RootNamespace>
+    <Product>SpatialAudioLab EC-3 Recorder</Product>
+    <Description>Records the live E-AC3 stream from the MAT capture ring</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+</Project>
