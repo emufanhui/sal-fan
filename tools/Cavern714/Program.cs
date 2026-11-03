@@ -66,9 +66,12 @@ if (args.Length < 3) {
 string output = Path.GetFullPath(args[2]);
 double requestedSeconds = args.Length >= 4 ?
     double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture) :
-    reader.Length / (double)reader.SampleRate;
+    0;
 if (requestedSeconds <= 0) {
-    Console.Error.WriteLine("Duration must be greater than zero.");
+    requestedSeconds = reader.Length / (double)reader.SampleRate;
+}
+if (requestedSeconds <= 0 || reader.Length <= 0) {
+    Console.Error.WriteLine("Could not determine a finite input duration.");
     return 64;
 }
 double gain = args.Length >= 5 ?
