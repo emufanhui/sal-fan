@@ -1,0 +1,13 @@
+<Application x:Class="Ec3Recorder.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#FF171A21" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#FF1F232C" />
+        <SolidColorBrush x:Key="EdgeBrush" Color="#FF2E3440" />
+        <SolidColorBrush x:Key="TextBrush" Color="#FFE6E9EF" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#FF8B93A7" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#FF4C8DFF" />
+    </Application.Resources>
+</Application>
