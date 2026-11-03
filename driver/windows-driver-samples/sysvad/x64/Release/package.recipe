@@ -1,0 +1,29 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <ProjectOutputs>
+    <ProjectOutput>
+      <FullPath>D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\KeywordDetectorAdapter\x64\Release\KeywordDetectorContosoAdapter.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\APO\SwapAPO\x64\Release\SwapAPO.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\APO\DelayAPO\x64\Release\DelayAPO.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\APO\KWSApo\x64\Release\KWSApo.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\APO\AecApo\x64\Release\AecApo.dll</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\TabletAudioSample.sys</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\Package\x64\Release\package</FullPath>
+    </ProjectOutput>
+  </ProjectOutputs>
+  <ContentFiles />
+  <SatelliteDlls />
+  <NonRecipeFileRefs />
+</Project>

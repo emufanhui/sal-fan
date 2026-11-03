@@ -1,0 +1,14 @@
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\A2dpHpDevice.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\A2dpHpDevice.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\adapter.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\adapter.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\basetopo.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\basetopo.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\BthhfpDevice.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\BthhfpDevice.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\common.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\common.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\hw.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\hw.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\kshelper.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\kshelper.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\matcapture.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\matcapture.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\savedata.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\savedata.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\tonegenerator.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\tonegenerator.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\UsbHsDevice.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\UsbHsDevice.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\hdmitopo.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\hdmitopo.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\micintopo.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\micintopo.obj
+D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\spdiftopo.cpp;D:\sp\spatial-audio-lab\driver\windows-driver-samples\audio\sysvad\TabletAudioSample\x64\Release\spdiftopo.obj
