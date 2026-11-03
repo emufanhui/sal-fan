@@ -8,6 +8,6 @@
     <RootNamespace>Cavern714</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\\..\\third_party\\Cavern\\Cavern.Format\\Cavern.Format.csproj" />
+    <ProjectReference Include="..\..\third_party\Cavern\Cavern.Format\Cavern.Format.csproj" />
   </ItemGroup>
 </Project>
