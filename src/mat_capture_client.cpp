@@ -686,69 +686,52 @@ public:
 
     std::uint64_t PayloadBytes() const noexcept { return payloadBytes_; }
     std::uint64_t Bursts() const noexcept { return bursts_; }
-    /// Drops any partially-buffered carrier so the next bytes are re-synced to a
-    /// fresh IEC preamble. Called after a ring sequence gap: a dropped/inserted
-    /// byte shifts the 16-bit word swap and scrambles everything after it, so the
-    /// only safe move is to discard the misaligned tail and re-lock on the next
-    /// preamble.
+    std::uint64_t MarkerErrors() const noexcept { return markerErrors_; }
+
+    // A ring sequence gap invalidates the current burst and 16-bit word alignment.
     void Reset() {
         pending_.clear();
     }
 
-private:
-    static constexpr std::size_t kNoMatch = static_cast<std::size_t>(-1);
-
-    // The IEC 61937-12 MAT carrier delivers the MLP/TrueHD substream in fixed
-    // 61440-byte bursts. Each burst begins with an 8-byte IEC preamble
-    // (72 F8 1F 4E 16 00 ...) followed by a 24-byte MAT substream header, then
-    // the byte-swapped (16-bit LE word) MLP payload, zero-padded out to the
-    // burst size. The payload simply continues across bursts (one MLP frame may
-    // span several bursts), so we drop only the 32-byte per-burst header and
-    // byte-swap the remainder, concatenating every burst into one continuous
-    // MLP/TrueHD stream the decoder can parse.
-    void Drain() {
-        std::size_t from = 0;
-        while (true) {
-            const std::size_t p = FindPreamble(from);
-            if (p == kNoMatch) break;
-            if (p + 32 > pending_.size()) { from = p; break; }
-            const std::size_t q = FindPreamble(p + 32);
-            if (q == kNoMatch) { from = p; break; }
-            // Skip the 8-byte IEC preamble + 24-byte MAT substream header; the
-            // rest is the byte-swapped MLP payload. Unswap and emit it.
-            const std::size_t burstPayload = q - (p + 32);
-            WriteBurst(&pending_[p + 32], burstPayload);
-            from = q;
-        }
-        Trim(from);
-    }
-
-public:
-    // Flush any trailing burst that has no following preamble (end of stream).
+    // Flush the final complete burst. An incomplete final burst is discarded.
     void Finish() {
         std::size_t from = 0;
         while (true) {
             const std::size_t p = FindPreamble(from);
             if (p == kNoMatch) break;
-            if (p + 32 > pending_.size()) {
-                const std::size_t tail = pending_.size() - (p + 32);
-                if (tail > 0) WriteBurst(&pending_[p + 32], tail);
-                break;
+            if (p + kBurstBytes > pending_.size()) break;
+            if (PdAt(p) == kMatPayloadBytes) {
+                WriteBurst(p);
             }
-            const std::size_t q = FindPreamble(p + 32);
-            if (q == kNoMatch) {
-                WriteBurst(&pending_[p + 32], pending_.size() - (p + 32));
-                break;
-            }
-            WriteBurst(&pending_[p + 32], q - (p + 32));
-            from = q;
+            from = p + kBurstBytes;
         }
         pending_.clear();
     }
 
 private:
+    static constexpr std::size_t kNoMatch = static_cast<std::size_t>(-1);
+    static constexpr std::size_t kIecHeaderBytes = 8;
+    static constexpr std::size_t kMatPayloadBytes = 61424;
+    static constexpr std::size_t kBurstBytes = 61440;
+    static constexpr std::size_t kMiddleOffset = 30708;
+    static constexpr std::size_t kEndOffset = 61408;
+
+    static constexpr std::array<BYTE, 20> kStartCode = {
+        0x07, 0x9E, 0x00, 0x03, 0x84, 0x01, 0x01, 0x01, 0x80, 0x00,
+        0x56, 0xA5, 0x3B, 0xF4, 0x81, 0x83, 0x49, 0x80, 0x77, 0xE0
+    };
+    static constexpr std::array<BYTE, 12> kMiddleCode = {
+        0xC3, 0xC1, 0x42, 0x49, 0x3B, 0xFA, 0x82, 0x83, 0x49, 0x80, 0x77, 0xE0
+    };
+    static constexpr std::array<BYTE, 16> kEndCode = {
+        0xC3, 0xC2, 0xC0, 0xC4, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x97, 0x11
+    };
+
+    // IEC 61937 preamble is little-endian in the captured carrier:
+    // Pa=0xF872, Pb=0x4E1F, Pc=0x0016 (MAT), Pd=61424 bytes.
     std::size_t FindPreamble(std::size_t from) const {
-        for (std::size_t i = from; i + 5 < pending_.size(); ++i) {
+        for (std::size_t i = from; i + kIecHeaderBytes <= pending_.size(); ++i) {
             if (pending_[i] == 0x72 && pending_[i + 1] == 0xF8 &&
                 pending_[i + 2] == 0x1F && pending_[i + 3] == 0x4E &&
                 pending_[i + 4] == 0x16 && pending_[i + 5] == 0x00) {
@@ -758,26 +741,71 @@ private:
         return kNoMatch;
     }
 
-    void WriteBurst(const BYTE* data, std::size_t bytes) {
-        const std::size_t n = bytes & ~static_cast<std::size_t>(1);
-        swapped_.clear();
-        swapped_.reserve(n);
-        for (std::size_t i = 0; i < n; i += 2) {
-            swapped_.push_back(data[i + 1]);
-            swapped_.push_back(data[i]);
+    std::uint16_t PdAt(std::size_t p) const {
+        return static_cast<std::uint16_t>(
+            pending_[p + 6] | (static_cast<std::uint16_t>(pending_[p + 7]) << 8));
+    }
+
+    void Drain() {
+        std::size_t from = 0;
+        while (true) {
+            const std::size_t p = FindPreamble(from);
+            if (p == kNoMatch) break;
+
+            // One IEC burst is exactly 61440 bytes, including its 8-byte preamble
+            // and 8 bytes of trailing carrier padding.
+            if (p + kBurstBytes > pending_.size()) {
+                from = p;
+                break;
+            }
+
+            if (PdAt(p) == kMatPayloadBytes) {
+                WriteBurst(p);
+            }
+            from = p + kBurstBytes;
         }
-        if (!swapped_.empty()) {
-            sink_(swapped_.data(), swapped_.size());
-            payloadBytes_ += swapped_.size();
-            ++bursts_;
+        Trim(from);
+    }
+
+    void WriteBurst(std::size_t p) {
+        // The 61424-byte MAT payload is word-swapped in the IEC carrier.
+        // Restore byte order before checking the MAT frame markers.
+        swapped_.resize(kMatPayloadBytes);
+        const BYTE* payload = pending_.data() + p + kIecHeaderBytes;
+        for (std::size_t i = 0; i < kMatPayloadBytes; i += 2) {
+            swapped_[i] = payload[i + 1];
+            swapped_[i + 1] = payload[i];
         }
+
+        // MAT framing bytes are transport markers, not TrueHD elementary-stream
+        // bytes. Remove all three markers: 20-byte START, 12-byte MIDDLE and
+        // 16-byte END. The remaining 61376 bytes continue the MLP bitstream.
+        if (!std::equal(kStartCode.begin(), kStartCode.end(), swapped_.begin()) ||
+            !std::equal(kMiddleCode.begin(), kMiddleCode.end(),
+                        swapped_.begin() + kMiddleOffset) ||
+            !std::equal(kEndCode.begin(), kEndCode.end(),
+                        swapped_.begin() + kEndOffset)) {
+            ++markerErrors_;
+            return;
+        }
+
+        constexpr std::size_t firstBegin = kStartCode.size();
+        constexpr std::size_t firstEnd = kMiddleOffset;
+        constexpr std::size_t secondBegin = kMiddleOffset + kMiddleCode.size();
+        constexpr std::size_t secondEnd = kEndOffset;
+        sink_(swapped_.data() + firstBegin, firstEnd - firstBegin);
+        sink_(swapped_.data() + secondBegin, secondEnd - secondBegin);
+        payloadBytes_ += (firstEnd - firstBegin) + (secondEnd - secondBegin);
+        ++bursts_;
     }
 
     void Trim(std::size_t from) {
-        pending_.erase(pending_.begin(), pending_.begin() + from);
-        constexpr std::size_t kKeep = 8 + 61440 * 2;
-        if (pending_.size() > kKeep) {
-            pending_.erase(pending_.begin(), pending_.end() - kKeep);
+        if (from > 0) {
+            pending_.erase(pending_.begin(), pending_.begin() + from);
+        }
+        // Keep enough tail for a split IEC preamble and one incomplete burst.
+        if (pending_.size() > kBurstBytes * 2) {
+            pending_.erase(pending_.begin(), pending_.end() - kBurstBytes);
         }
     }
 
@@ -786,8 +814,8 @@ private:
     std::vector<BYTE> swapped_;
     std::uint64_t payloadBytes_ = 0;
     std::uint64_t bursts_ = 0;
+    std::uint64_t markerErrors_ = 0;
 };
-
 void StreamMatToPipe(const std::wstring& pipeName, const DWORD pollMilliseconds) {
     const std::wstring fullName = L"\\\\.\\pipe\\" + pipeName;
     WinHandle pipe(CreateNamedPipeW(
